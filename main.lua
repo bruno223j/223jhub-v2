@@ -201,7 +201,8 @@ local Cfg = {
         AimbotKey=Enum.KeyCode.F3,   AimbotKeyName="F3",
         FlyKey=Enum.KeyCode.F5,      FlyKeyName="F5",
         NoclipKey=Enum.KeyCode.F6,   NoclipKeyName="F6",
-        SpeedKey=Enum.KeyCode.F7,    SpeedKeyName="F7",
+SpeedKey=Enum.KeyCode.F7,    SpeedKeyName="F7",
+        ClickTpKey=Enum.KeyCode.F8, ClickTpKeyName="F8",
         ToggleKeyName="Semicolon",
         BlockGameInput=false, VSync=false,
     },
@@ -238,7 +239,7 @@ local function ValidateConfig(t)
         if t.Aim.AimKeyName~=nil and type(t.Aim.AimKeyName)~="string" then return false,"Aim.AimKeyName must be text" end
     end
     if t.Settings then
-        for _,key in ipairs({"ToggleKeyName","ESPKeyName","AimbotKeyName","FlyKeyName","NoclipKeyName","SpeedKeyName"}) do
+        for _,key in ipairs({"ToggleKeyName","ESPKeyName","AimbotKeyName","FlyKeyName","NoclipKeyName","SpeedKeyName","ClickTpKeyName"}) do
             if t.Settings[key]~=nil and type(t.Settings[key])~="string" then return false,"Settings."..key.." must be text" end
         end
     end
@@ -284,6 +285,7 @@ local function ApplySave(t)
     Cfg.Settings.FlyKey=TK(Cfg.Settings.FlyKeyName,KeepBind(Cfg.Settings.FlyKey,Enum.KeyCode.F5))
     Cfg.Settings.NoclipKey=TK(Cfg.Settings.NoclipKeyName,KeepBind(Cfg.Settings.NoclipKey,Enum.KeyCode.F6))
     Cfg.Settings.SpeedKey=TK(Cfg.Settings.SpeedKeyName,KeepBind(Cfg.Settings.SpeedKey,Enum.KeyCode.F7))
+    Cfg.Settings.ClickTpKey=TK(Cfg.Settings.ClickTpKeyName,KeepBind(Cfg.Settings.ClickTpKey,Enum.KeyCode.F8))
     Cfg.ESP.UpdateRate=math.clamp(tonumber(Cfg.ESP.UpdateRate) or 30,1,60)
     _espInterval=1/Cfg.ESP.UpdateRate
     DiagModule("Saves","ok",nil,0)
@@ -1206,6 +1208,7 @@ AC(UIS.InputBegan:Connect(function(inp,gp)
     elseif BindMatches(inp,Cfg.Settings.FlyKey) then Cfg.Misc.Fly=not Cfg.Misc.Fly; if Cfg.Misc.Fly then EnableFly() else DisableFly() end; TR("Fly")
     elseif BindMatches(inp,Cfg.Settings.NoclipKey) then Cfg.Misc.Noclip=not Cfg.Misc.Noclip; if Cfg.Misc.Noclip then EnableNoclip() else DisableNoclip() end; TR("NC")
     elseif BindMatches(inp,Cfg.Settings.SpeedKey) then Cfg.Misc.Speed=not Cfg.Misc.Speed; ApplySpeed(); TR("Speed")
+    elseif BindMatches(inp,Cfg.Settings.ClickTpKey) then Cfg.Misc.ClickTp=not Cfg.Misc.ClickTp; TR("Click TP")
     end
 end))
 
@@ -1279,7 +1282,7 @@ end
 local function FindBindConflicts()
     local entries={
         {"Menu",Cfg.Settings.ToggleKey},{"ESP",Cfg.Settings.ESPKey},{"Aimbot Toggle",Cfg.Settings.AimbotKey},
-        {"Fly",Cfg.Settings.FlyKey},{"Noclip",Cfg.Settings.NoclipKey},{"Speed",Cfg.Settings.SpeedKey},{"Aim Lock",Cfg.Aim.AimKey}
+        {"Fly",Cfg.Settings.FlyKey},{"Noclip",Cfg.Settings.NoclipKey},{"Speed",Cfg.Settings.SpeedKey},{"Click Teleport",Cfg.Settings.ClickTpKey},{"Aim Lock",Cfg.Aim.AimKey}
     }
     local seen={}; local conflicts={}
     for _,entry in ipairs(entries) do
@@ -1533,7 +1536,8 @@ BindButton(Tabs.Binds,"Aimbot Toggle",function() return Cfg.Settings.AimbotKeyNa
 BindButton(Tabs.Binds,"Fly Toggle",function() return Cfg.Settings.FlyKeyName end,function(k,n) Cfg.Settings.FlyKey=k; Cfg.Settings.FlyKeyName=n end)
 BindButton(Tabs.Binds,"Noclip Toggle",function() return Cfg.Settings.NoclipKeyName end,function(k,n) Cfg.Settings.NoclipKey=k; Cfg.Settings.NoclipKeyName=n end)
 BindButton(Tabs.Binds,"Speed Toggle",function() return Cfg.Settings.SpeedKeyName end,function(k,n) Cfg.Settings.SpeedKey=k; Cfg.Settings.SpeedKeyName=n end)
-Tabs.Binds:AddParagraph({Title="Mouse support",Content="All bind selectors accept keyboard keys, Mouse1 and Mouse2."})
+BindButton(Tabs.Binds,"Click Teleport Toggle",function() return Cfg.Settings.ClickTpKeyName end,function(k,n) Cfg.Settings.ClickTpKey=k; Cfg.Settings.ClickTpKeyName=n end)
+Tabs.Binds:AddParagraph({Title="Mouse support",Content="All bind selectors accept keyboard keys, Mouse1-Mouse5 and mouse wheel."})
 Tabs.Binds:AddButton({Title="Check Bind Conflicts",Callback=function()
     local conflicts=NotifyBindConflicts()
     if #conflicts==0 then Fluent:Notify({Title="Binds",Content="No conflicts detected.",Duration=2}) end
