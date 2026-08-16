@@ -1595,7 +1595,7 @@ Tabs.Credits:AddParagraph({Title="Developers",Content="Bruno223j and TY"})
 Tabs.Credits:AddParagraph({Title="Discord",Content="bruno223j & frty2017"})
 Tabs.Credits:AddParagraph({Title="Final Edition",Content="ESP, controls and cleanup finalized."})
 Window:SelectTab(1)
-Fluent:Notify({Title="223JHUB 2.0",Content="Fluent interface loaded.",Duration=4})
+Fluent:Notify({Title="223JHUB 2.5",Content="Fluent interface loaded.",Duration=4})
 -- O Fluent pode alterar o foco durante a montagem; aplica o estado final depois disso.
 task.defer(function()
     SetHubFocus(_hubMenuOpen)
