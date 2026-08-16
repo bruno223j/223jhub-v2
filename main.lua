@@ -106,8 +106,45 @@ end
 
 if _G._223HUB_Kill then pcall(_G._223HUB_Kill) end
 local _conns = {}
+local _resources = {}
 local _hubShutdown=false
-local function AC(c) _conns[#_conns+1]=c; return c end
+local _diag={}
+local function AC(c)
+    if c then _conns[#_conns+1]=c end
+    return c
+end
+local function AR(resource)
+    if resource then _resources[resource]=true end
+    return resource
+end
+local function ReleaseResource(resource)
+    if not resource then return end
+    _resources[resource]=nil
+    pcall(function() resource.Visible=false end)
+    pcall(function() resource:Remove() end)
+    pcall(function() resource:Destroy() end)
+end
+local function CleanupResources()
+    for resource in pairs(_resources) do ReleaseResource(resource) end
+    _resources={}
+end
+local function DiagModule(name,status,err,elapsed)
+    _diag[name]={status=status or "unknown",error=err and tostring(err) or nil,lastUpdate=os.clock(),elapsed=elapsed or 0}
+end
+local function DiagError(name,err)
+    DiagModule(name,"error",err,0)
+end
+local function DiagSummary()
+    local out={}
+    for name,v in pairs(_diag) do
+        local err=v.error and " err="..tostring(v.error) or ""
+        out[#out+1]=name.."="..tostring(v.status).." ("..string.format("%.2fms",(v.elapsed or 0)*1000)..")"..err
+    end
+    table.sort(out)
+    local resourceCount=0; for _ in pairs(_resources) do resourceCount=resourceCount+1 end
+    out[#out+1]="connections="..tostring(#_conns).." resources="..tostring(resourceCount)
+    return #out>0 and table.concat(out," | ") or "No diagnostics recorded"
+end
 
 _G._223HUB_Kill = function()
     if _hubShutdown then return end
@@ -118,6 +155,7 @@ _G._223HUB_Kill = function()
         for _,d in pairs(_G._223HUB_DrawPool) do pcall(function() d:Remove() end) end
         _G._223HUB_DrawPool={}
     end
+    CleanupResources()
     if _GuiParent:FindFirstChild("223TYHUB") then _GuiParent:FindFirstChild("223TYHUB"):Destroy() end
 end
 _G._223HUB_DrawPool = _G._223HUB_DrawPool or {}
@@ -189,8 +227,27 @@ local function SerCfg()
     for k,v in pairs(Cfg.Settings) do if type(v)=="string" then t.Settings[k]=v end end
     return HttpService:JSONEncode(t)
 end
+local function ValidateConfig(t)
+    if type(t)~="table" then return false,"Config root must be an object" end
+    for _,section in ipairs({"ESP","Aim","Trigger","Misc","Settings"}) do
+        if t[section]~=nil and type(t[section])~="table" then return false,"Section "..section.." must be an object" end
+    end
+    if t.Aim then
+        if t.Aim.Blacklist~=nil and type(t.Aim.Blacklist)~="table" then return false,"Aim.Blacklist must be an object" end
+        if t.Aim.AimKeyName~=nil and type(t.Aim.AimKeyName)~="string" then return false,"Aim.AimKeyName must be text" end
+    end
+    if t.Settings then
+        for _,key in ipairs({"ToggleKeyName","ESPKeyName","AimbotKeyName","FlyKeyName","NoclipKeyName","SpeedKeyName"}) do
+            if t.Settings[key]~=nil and type(t.Settings[key])~="string" then return false,"Settings."..key.." must be text" end
+        end
+    end
+    if t.ESP and t.ESP.UpdateRate~=nil and (type(t.ESP.UpdateRate)~="number" or t.ESP.UpdateRate<1 or t.ESP.UpdateRate>60) then return false,"ESP.UpdateRate must be between 1 and 60" end
+    return true
+end
 local function ApplySave(t)
-    if not t then return end
+    local valid,err=ValidateConfig(t)
+    if not valid then DiagError("Saves",err); return false,err end
+    if not t then return false,"Empty config" end
     local function mg(d,s) if not s then return end
         for k,v in pairs(s) do
             if type(v)=="table" then if type(d[k])=="table" then mg(d[k],v) end
@@ -222,6 +279,8 @@ local function ApplySave(t)
     Cfg.Settings.SpeedKey=TK(Cfg.Settings.SpeedKeyName)
     Cfg.ESP.UpdateRate=math.clamp(tonumber(Cfg.ESP.UpdateRate) or 30,1,60)
     _espInterval=1/Cfg.ESP.UpdateRate
+    DiagModule("Saves","ok",nil,0)
+    return true
 end
 local function SaveCfg(name)
     if not writefile then return false,"writefile indisponvel" end
@@ -236,8 +295,10 @@ local function LoadCfg(name)
     if isfile and not isfile(fn) then return false,"No encontrado" end
     local ok,data=pcall(readfile,fn); if not ok then return false,"Erro" end
     local ok2,t=pcall(function() return HttpService:JSONDecode(data) end)
-    if not ok2 then return false,"JSON invlido" end
-    ApplySave(t); return true,fn
+    if not ok2 then DiagError("Saves","JSON invalido"); return false,"JSON invalido" end
+    local applied,applyErr=ApplySave(t)
+    if not applied then return false,applyErr end
+    return true,fn
 end
 local function ListCfgs()
     if not listfiles then return {} end
@@ -264,6 +325,7 @@ local function ND(kind, props)
     if not ok or not d then return nil end
     if props then for k,v in pairs(props) do pcall(function() d[k]=v end) end end
     DrawPool[d]=true
+    AR(d)
     return d
 end
 local function SafeSet(d, props)
@@ -876,10 +938,14 @@ end
 -- Reuses one Drawing pool per player and updates visual data at 30 FPS.
 -- ============================================================
 AC(RunService.RenderStepped:Connect(function(dt)
+    local frameStart=os.clock()
     local vs=Cam.ViewportSize
     local cx,cy=vs.X/2,vs.Y/2
     UpdateFOVCircle()
+    DiagModule("FOV",Cfg.Aim.ShowFOV and "active" or "idle",nil,os.clock()-frameStart)
 
+    local aimStart=os.clock()
+    local aimTargeted=false
     local aimHeld=IsBindHeldNow(Cfg.Aim.AimKey)
     if Cfg.Aim.AimKey=="ScrollUp" or Cfg.Aim.AimKey=="ScrollDown" then
         aimHeld=_G._scrollAimPulse; _G._scrollAimPulse=false
@@ -889,6 +955,7 @@ AC(RunService.RenderStepped:Connect(function(dt)
         local targetChar=target and target.Character
         local part=targetChar and (targetChar:FindFirstChild(Cfg.Aim.AimPart) or targetChar:FindFirstChild("HumanoidRootPart"))
         if target and targetChar and part then
+            aimTargeted=true
             local pos=part.Position
             if Cfg.Aim.Prediction then
                 local hrp=targetChar:FindFirstChild("HumanoidRootPart") or part
@@ -898,20 +965,27 @@ AC(RunService.RenderStepped:Connect(function(dt)
             Cam.CFrame=Cam.CFrame:Lerp(CFrame.new(Cam.CFrame.Position,pos),alpha)
         end
     end
+    DiagModule("Aimbot",not Cfg.Aim.Aimbot and "disabled" or (aimTargeted and "active" or "idle"),nil,os.clock()-aimStart)
 
+    local espStart=os.clock()
     if not Cfg.ESP.Enabled then
+        DiagModule("ESP","disabled",nil,os.clock()-espStart)
         for _,d in pairs(ESPO) do HideESP(d) end
         for _,d in pairs(DeadlineDrawings) do HideDeadlineESP(d) end
         return
     end
     local now=os.clock()
     local syncInterval=Cfg.Settings.VSync and math.max(tonumber(dt) or 1/60,1/240) or _espInterval
-    if now-_espLastUpdate<syncInterval then return end
+    if now-_espLastUpdate<syncInterval then
+        DiagModule("ESP","waiting",nil,os.clock()-espStart)
+        return
+    end
     _espLastUpdate=now
     local vsY=vs.Y
     if Cfg.ESP.Mode=="Deadline" then
         for _,d in pairs(ESPO) do HideESP(d) end
         UpdateDeadlineESP()
+        DiagModule("ESP","active",nil,os.clock()-espStart)
         return
     else
         for _,d in pairs(DeadlineDrawings) do HideDeadlineESP(d) end
@@ -979,6 +1053,7 @@ AC(RunService.RenderStepped:Connect(function(dt)
             HideESP(d)
         end
     end
+    DiagModule("ESP","active",nil,os.clock()-espStart)
 end))
 
 for _,p in ipairs(Players:GetPlayers()) do MakeESP(p) end
@@ -1174,6 +1249,29 @@ end
 local function S(tab,id,title,min,max,def,cb)
     tab:AddSlider(id,{Title=title,Min=min,Max=max,Default=def,Rounding=0,Callback=cb})
 end
+local function BindIdentity(bind)
+    if bind==nil then return nil end
+    return type(bind)=="string" and bind or tostring(bind)
+end
+local function FindBindConflicts()
+    local entries={
+        {"Menu",Cfg.Settings.ToggleKey},{"ESP",Cfg.Settings.ESPKey},{"Aimbot Toggle",Cfg.Settings.AimbotKey},
+        {"Fly",Cfg.Settings.FlyKey},{"Noclip",Cfg.Settings.NoclipKey},{"Speed",Cfg.Settings.SpeedKey},{"Aim Lock",Cfg.Aim.AimKey}
+    }
+    local seen={}; local conflicts={}
+    for _,entry in ipairs(entries) do
+        local id=BindIdentity(entry[2])
+        if id and id~="Enum.KeyCode.Unknown" then
+            if seen[id] then conflicts[#conflicts+1]=seen[id].." + "..entry[1].." ("..id..")" else seen[id]=entry[1] end
+        end
+    end
+    return conflicts
+end
+local function NotifyBindConflicts()
+    local conflicts=FindBindConflicts()
+    if #conflicts>0 then Fluent:Notify({Title="Bind conflict",Content=table.concat(conflicts," | "),Duration=4}) end
+    return conflicts
+end
 local waitingBind=false
 local function BindButton(tab,title,getName,setBind)
     tab:AddButton({Title=title..": ["..getName().."]",Callback=function()
@@ -1193,7 +1291,7 @@ local function BindButton(tab,title,getName,setBind)
             elseif M5 and inp.UserInputType==M5 then code,name=M5,"Mouse5"
             elseif inp.UserInputType==Enum.UserInputType.MouseWheel then code,name=(inp.Position.Z>0 and "ScrollUp" or "ScrollDown"), (inp.Position.Z>0 and "ScrollUp" or "ScrollDown") end
             if code then
-                cn:Disconnect(); waitingBind=false; setBind(code,name)
+                cn:Disconnect(); waitingBind=false; setBind(code,name); NotifyBindConflicts()
                 Fluent:Notify({Title="Bind updated",Content=title.." = "..name,Duration=2})
             end
         end)
@@ -1246,6 +1344,7 @@ local function SetAimBind(bind,name)
     Cfg.Aim.AimKey=bind
     Cfg.Aim.AimKeyName=name
     if AimLockBind and AimLockBind.SetTitle then pcall(function() AimLockBind:SetTitle(AimBindLabel()) end) end
+    NotifyBindConflicts()
 end
 AimLockBind=Tabs.Combat:AddButton({Title=AimBindLabel(),Callback=function()
     if aimBindWaiting then return end
@@ -1369,7 +1468,9 @@ Tabs.Saves:AddInput("ImportJson",{Title="JSON to import",Placeholder="Cole o JSO
 Tabs.Saves:AddButton({Title="Import JSON",Callback=function()
     local raw=Options.ImportJson and Options.ImportJson.Value or ""
     local ok,data=pcall(function() return HttpService:JSONDecode(raw) end)
-    if ok and type(data)=="table" then ApplySave(data); Fluent:Notify({Title="Saves",Content="JSON importado.",Duration=2}) else Fluent:Notify({Title="Saves",Content="JSON invalido.",Duration=2}) end
+    if not ok then DiagError("Saves","JSON invalido"); Fluent:Notify({Title="Saves",Content="JSON invalido.",Duration=2}); return end
+    local applied,err=ApplySave(data)
+    if applied then Fluent:Notify({Title="Saves",Content="JSON importado.",Duration=2}) else Fluent:Notify({Title="Saves",Content=tostring(err),Duration=3}) end
 end})
 Tabs.Saves:AddButton({Title="Export JSON",Callback=function()
     local raw=SerCfg()
@@ -1406,9 +1507,24 @@ BindButton(Tabs.Binds,"Fly Toggle",function() return Cfg.Settings.FlyKeyName end
 BindButton(Tabs.Binds,"Noclip Toggle",function() return Cfg.Settings.NoclipKeyName end,function(k,n) Cfg.Settings.NoclipKey=k; Cfg.Settings.NoclipKeyName=n end)
 BindButton(Tabs.Binds,"Speed Toggle",function() return Cfg.Settings.SpeedKeyName end,function(k,n) Cfg.Settings.SpeedKey=k; Cfg.Settings.SpeedKeyName=n end)
 Tabs.Binds:AddParagraph({Title="Mouse support",Content="All bind selectors accept keyboard keys, Mouse1 and Mouse2."})
+Tabs.Binds:AddButton({Title="Check Bind Conflicts",Callback=function()
+    local conflicts=NotifyBindConflicts()
+    if #conflicts==0 then Fluent:Notify({Title="Binds",Content="No conflicts detected.",Duration=2}) end
+end})
 
 Tabs.Settings:AddSection("Control")
 T(Tabs.Settings,"BlockGameInput","Block game interaction while menu is open",function() return Cfg.Settings.BlockGameInput end,function(v) Cfg.Settings.BlockGameInput=v; SetHubFocus(_hubMenuOpen) end)
+Tabs.Settings:AddSection("Diagnostics")
+Tabs.Settings:AddParagraph({Title="Runtime diagnostics",Content="Shows module state, recent errors, frame update time and managed resources."})
+Tabs.Settings:AddButton({Title="Run Diagnostics",Callback=function()
+    local conflicts=FindBindConflicts()
+    if #conflicts>0 then DiagError("Binds","Conflicts: "..table.concat(conflicts," | ")) else DiagModule("Binds","ok",nil,0) end
+    Fluent:Notify({Title="Diagnostics",Content=DiagSummary(),Duration=7})
+end})
+Tabs.Settings:AddButton({Title="Reset Diagnostic Errors",Callback=function()
+    for name,v in pairs(_diag) do if v.status=="error" then v.status="reset"; v.error=nil end end
+    Fluent:Notify({Title="Diagnostics",Content="Errors reset.",Duration=2})
+end})
 T(Tabs.Settings,"VSync","VSync - sync ESP with game FPS",function() return Cfg.Settings.VSync end,function(v) Cfg.Settings.VSync=v; _espLastUpdate=0 end)
 local function ShutdownHub()
     if _hubShutdown then return end
@@ -1429,6 +1545,7 @@ local function ShutdownHub()
     end)
     -- Disconnect every connection registered through AC.
     pcall(function() for _,conn in ipairs(_conns) do if conn then conn:Disconnect() end end end)
+    CleanupResources()
     pcall(function() CAS:UnbindAction(_hubBlockAction) end)
     pcall(function() Fluent:Unload() end)
     pcall(function() if _GuiParent and _GuiParent:FindFirstChild("223TYHUB") then _GuiParent:FindFirstChild("223TYHUB"):Destroy() end end)
