@@ -196,12 +196,13 @@ local Cfg = {
         AlwaysSprint=false,
     },
     Settings = {
-        ToggleKey=Enum.KeyCode.Semicolon, ToggleKeyName=";",
+        ToggleKey=Enum.KeyCode.Semicolon,
         ESPKey=Enum.KeyCode.F2,      ESPKeyName="F2",
         AimbotKey=Enum.KeyCode.F3,   AimbotKeyName="F3",
         FlyKey=Enum.KeyCode.F5,      FlyKeyName="F5",
         NoclipKey=Enum.KeyCode.F6,   NoclipKeyName="F6",
         SpeedKey=Enum.KeyCode.F7,    SpeedKeyName="F7",
+        ToggleKeyName="Semicolon",
         BlockGameInput=false, VSync=false,
     },
 }
@@ -259,24 +260,30 @@ local function ApplySave(t)
     mg(Cfg.Settings,t.Settings)
     local M3,M4,M5
     pcall(function() M3=Enum.UserInputType.MouseButton3; M4=Enum.UserInputType.MouseButton4; M5=Enum.UserInputType.MouseButton5 end)
-    local function TK(n)
+    local function TK(n,fallback)
         if n=="Mouse1" then return Enum.UserInputType.MouseButton1 end
         if n=="Mouse2" then return Enum.UserInputType.MouseButton2 end
-        if n=="Mouse3" then return M3 end
-        if n=="Mouse4" then return M4 end
-        if n=="Mouse5" then return M5 end
+        if n=="Mouse3" then return M3 or fallback end
+        if n=="Mouse4" then return M4 or fallback end
+        if n=="Mouse5" then return M5 or fallback end
         if n=="ScrollUp" or n=="ScrollDown" then return n end
-        if not n then return Enum.KeyCode.Unknown end
+        local aliases={ [";"]="Semicolon", ["`"]="Backquote", ["["]="LeftBracket", ["]"]="RightBracket", ["\\"]="Backslash", ["'"]="Quote", [","]="Comma", ["."]="Period", ["/"]="Slash", ["-"]="Minus", ["="]="Equals" }
+        n=aliases[n] or n
+        if not n then return fallback or Enum.KeyCode.Unknown end
         local ok,k=pcall(function() return Enum.KeyCode[n] end)
-        return (ok and k) or Enum.KeyCode.Unknown
+        if ok and k and k~=Enum.KeyCode.Unknown then return k end
+        return fallback or Enum.KeyCode.Unknown
     end
-    Cfg.Aim.AimKey=TK(Cfg.Aim.AimKeyName)
-    Cfg.Settings.ToggleKey=TK(Cfg.Settings.ToggleKeyName)
-    Cfg.Settings.ESPKey=TK(Cfg.Settings.ESPKeyName)
-    Cfg.Settings.AimbotKey=TK(Cfg.Settings.AimbotKeyName)
-    Cfg.Settings.FlyKey=TK(Cfg.Settings.FlyKeyName)
-    Cfg.Settings.NoclipKey=TK(Cfg.Settings.NoclipKeyName)
-    Cfg.Settings.SpeedKey=TK(Cfg.Settings.SpeedKeyName)
+    local function KeepBind(current,default)
+        return (current and current~=Enum.KeyCode.Unknown) and current or default
+    end
+    Cfg.Aim.AimKey=TK(Cfg.Aim.AimKeyName,KeepBind(Cfg.Aim.AimKey,Enum.KeyCode.E))
+    Cfg.Settings.ToggleKey=TK(Cfg.Settings.ToggleKeyName,KeepBind(Cfg.Settings.ToggleKey,Enum.KeyCode.Semicolon))
+    Cfg.Settings.ESPKey=TK(Cfg.Settings.ESPKeyName,KeepBind(Cfg.Settings.ESPKey,Enum.KeyCode.F2))
+    Cfg.Settings.AimbotKey=TK(Cfg.Settings.AimbotKeyName,KeepBind(Cfg.Settings.AimbotKey,Enum.KeyCode.F3))
+    Cfg.Settings.FlyKey=TK(Cfg.Settings.FlyKeyName,KeepBind(Cfg.Settings.FlyKey,Enum.KeyCode.F5))
+    Cfg.Settings.NoclipKey=TK(Cfg.Settings.NoclipKeyName,KeepBind(Cfg.Settings.NoclipKey,Enum.KeyCode.F6))
+    Cfg.Settings.SpeedKey=TK(Cfg.Settings.SpeedKeyName,KeepBind(Cfg.Settings.SpeedKey,Enum.KeyCode.F7))
     Cfg.ESP.UpdateRate=math.clamp(tonumber(Cfg.ESP.UpdateRate) or 30,1,60)
     _espInterval=1/Cfg.ESP.UpdateRate
     DiagModule("Saves","ok",nil,0)
