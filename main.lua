@@ -73,16 +73,45 @@ local TweenService    = game:GetService("TweenService")
 local HttpService     = game:GetService("HttpService")
 local Workspace       = game:GetService("Workspace")
 local TeleportService = game:GetService("TeleportService")
-
 local LP    = Players.LocalPlayer
 local Mouse = LP:GetMouse()
 local Cam   = Workspace.CurrentCamera
 
+local function Rejoin()
+    local ok,err=pcall(function() TeleportService:Teleport(game.PlaceId,LP) end)
+    if not ok then warn("[223JHUB] Rejoin failed: "..tostring(err)) end
+end
+local function ServerHop()
+    local url="https://games.roblox.com/v1/games/"..tostring(game.PlaceId).."/servers/Public?sortOrder=Asc&limit=100"
+    local ok,raw=pcall(function()
+        if game.HttpGet then return game:HttpGet(url) end
+        return HttpService:GetAsync(url)
+    end)
+    local data
+    if ok and raw then pcall(function() data=HttpService:JSONDecode(raw) end) end
+    if data and type(data.data)=="table" then
+        local candidates={}
+        for _,srv in ipairs(data.data) do
+            if srv.id and srv.id~=game.JobId and tonumber(srv.playing or 0)<tonumber(srv.maxPlayers or 0) then candidates[#candidates+1]=srv.id end
+        end
+        if #candidates>0 then
+            local target=candidates[math.random(1,#candidates)]
+            local hopped,hErr=pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId,target,LP) end)
+            if hopped then return end
+            warn("[223JHUB] Server hop instance failed: "..tostring(hErr))
+        end
+    end
+    Rejoin()
+end
+
 if _G._223HUB_Kill then pcall(_G._223HUB_Kill) end
 local _conns = {}
+local _hubShutdown=false
 local function AC(c) _conns[#_conns+1]=c; return c end
 
 _G._223HUB_Kill = function()
+    if _hubShutdown then return end
+    _hubShutdown=true
     for _,c in ipairs(_conns) do pcall(function() c:Disconnect() end) end
     _conns={}
     if _G._223HUB_DrawPool then
@@ -94,6 +123,7 @@ end
 _G._223HUB_DrawPool = _G._223HUB_DrawPool or {}
 local DrawPool = _G._223HUB_DrawPool
 
+local _espInterval=1/30
 local Cfg = {
     ESP = {
         Enabled=false, Box=false, Fill=false, Names=false,
@@ -105,6 +135,7 @@ local Cfg = {
         DistColor=Color3.fromRGB(200,200,200), HPColor=Color3.fromRGB(0,255,0),
         HPBgColor=Color3.fromRGB(60,0,0), ToolColor=Color3.fromRGB(255,210,50),
         Skeleton=false, SkelColor=Color3.fromRGB(0,220,255), Mode="Default (Universal)",
+        UpdateRate=30, RadarEnabled=false, RadarTarget="",
     },
     Aim = {
         Aimbot=false, AimbotType="Default (Universal)", WallCheck=false, TeamCheck=false,
@@ -112,7 +143,7 @@ local Cfg = {
         FOV=150, ShowFOV=false, UseFOV=false, FOVFollow=false,
         AimPart="Head", Smoothness=8,
         AimKey=Enum.KeyCode.E, AimKeyName="E",
-        AimStrength=70, Blacklist={},
+        AimStrength=70, Blacklist={}, FocusPriorityEnabled=false, FocusPriority="Closest",
     },
     Trigger = { Enabled=false, TeamCheck=false, Delay=80, AutoBot=false,
                 ClickControl=false, ClickCount=3,
@@ -133,7 +164,7 @@ local Cfg = {
         FlyKey=Enum.KeyCode.F5,      FlyKeyName="F5",
         NoclipKey=Enum.KeyCode.F6,   NoclipKeyName="F6",
         SpeedKey=Enum.KeyCode.F7,    SpeedKeyName="F7",
-        BlockGameInput=false,
+        BlockGameInput=false, VSync=false,
     },
 }
 
@@ -189,6 +220,8 @@ local function ApplySave(t)
     Cfg.Settings.FlyKey=TK(Cfg.Settings.FlyKeyName)
     Cfg.Settings.NoclipKey=TK(Cfg.Settings.NoclipKeyName)
     Cfg.Settings.SpeedKey=TK(Cfg.Settings.SpeedKeyName)
+    Cfg.ESP.UpdateRate=math.clamp(tonumber(Cfg.ESP.UpdateRate) or 30,1,60)
+    _espInterval=1/Cfg.ESP.UpdateRate
 end
 local function SaveCfg(name)
     if not writefile then return false,"writefile indisponvel" end
@@ -340,8 +373,9 @@ local function SameTeam(p)
 end
 
 local function IsValidTarget(p)
-    if p==LP then return false end
-    if Cfg.Aim.Blacklist[p.Name] then return false end
+    if not p or p==LP then return false end
+    if type(Cfg.Aim.Blacklist)~="table" then Cfg.Aim.Blacklist={} end
+    if Cfg.Aim.Blacklist[p.Name]==true then return false end
     if Cfg.Aim.TeamCheck and SameTeam(p) then return false end
     local c=p.Character; if not c then return false end
     local h=c:FindFirstChildOfClass("Humanoid")
@@ -360,23 +394,30 @@ end
 -- OTIMIZAO 2: ClosestTarget  usa cache de visibilidade
 -- ============================================================
 local function ClosestTarget()
-    local vs     = Cam.ViewportSize
-    local center = Vector2.new(vs.X/2, vs.Y/2)
-    local best, bestD = nil, math.huge
-
+    local vs=Cam.ViewportSize
+    local center=Vector2.new(vs.X/2,vs.Y/2)
+    local best,bestScore=nil,nil
     for _,p in ipairs(Players:GetPlayers()) do
         if not IsValidTarget(p) then continue end
-        local c    = p.Character
-        local part = c:FindFirstChild(Cfg.Aim.AimPart) or c:FindFirstChild("HumanoidRootPart")
+        local c=p.Character
+        local part=c:FindFirstChild(Cfg.Aim.AimPart) or c:FindFirstChild("HumanoidRootPart")
         if not part then continue end
-
-        if Cfg.Aim.WallCheck and not IsVisibleCached(p, c) then continue end
-
-        local sp, onScreen = W2S(part.Position)
+        if Cfg.Aim.WallCheck and not IsVisibleCached(p,c) then continue end
+        local sp,onScreen=W2S(part.Position)
         if not onScreen then continue end
-        local d = (sp - center).Magnitude
-        if Cfg.Aim.UseFOV and d > Cfg.Aim.FOV then continue end
-        if d < bestD then bestD=d; best=p end
+        local screenDist=(sp-center).Magnitude
+        if Cfg.Aim.UseFOV and screenDist>Cfg.Aim.FOV then continue end
+        local hum=c:FindFirstChildOfClass("Humanoid")
+        local health=hum and hum.Health or 0
+        local score=screenDist
+        if Cfg.Aim.FocusPriorityEnabled then
+            local mode=Cfg.Aim.FocusPriority
+            if mode=="Farthest" then score=-screenDist
+            elseif mode=="Most Health" then score=-health
+            elseif mode=="Least Health" then score=health
+            else score=screenDist end
+        end
+        if bestScore==nil or score<bestScore then bestScore=score; best=p end
     end
     return best
 end
@@ -386,7 +427,6 @@ end
 -- ============================================================
 local ESPO = {}
 local _espLastUpdate=0
-local _espInterval=1/30
 
 local BONES_R15 = {
     {"Head","UpperTorso"},{"UpperTorso","LowerTorso"},
@@ -761,6 +801,7 @@ local function MakeDeadlineESP(model)
         Box=ND("Square",{Filled=false,Thickness=1,Transparency=1,Color=Color3.fromRGB(0,255,255),Visible=false}),
         Name=ND("Text",{Size=13,Center=true,Outline=true,Color=Color3.fromRGB(255,255,100),Visible=false}),
         Tracer=ND("Line",{Thickness=1,Transparency=0.75,Color=Color3.fromRGB(255,0,0),Visible=false}),
+        Tool=ND("Text",{Size=12,Center=true,Outline=true,Color=Cfg.ESP.ToolColor,Visible=false}),
         HPBar=ND("Square",{Filled=true,Color=Color3.fromRGB(0,255,0),Visible=false}),
         HPBg=ND("Square",{Filled=true,Color=Cfg.ESP.HPBgColor,Transparency=0.7,Visible=false})
     }
@@ -794,7 +835,8 @@ local function UpdateDeadlineESP()
             local d=MakeDeadlineESP(model)
             local rootPos,onScreen=Cam:WorldToViewportPoint(root.Position)
             local player=DeadlinePlayer(model)
-            local allowed=not Cfg.ESP.TeamCheck or not player or not SameTeam(player)
+            local radarAllowed=not Cfg.ESP.RadarEnabled or Cfg.ESP.RadarTarget=="" or (player and player.Name==Cfg.ESP.RadarTarget) or model.Name==Cfg.ESP.RadarTarget
+            local allowed=(not Cfg.ESP.TeamCheck or not player or not SameTeam(player)) and radarAllowed
             local dist=localPos and (root.Position-localPos).Magnitude or 0
             local visible=not Cfg.ESP.WallCheck or DeadlineVisible(model,root)
             if not onScreen or rootPos.Z<0 or dist>Cfg.ESP.MaxDist or not allowed or not visible then
@@ -808,6 +850,10 @@ local function UpdateDeadlineESP()
                 local boxPos=Vector2.new(rootPos.X-boxWidth/2,math.min(topPos.Y,bottomPos.Y))
                 if Cfg.ESP.Box then SafeSet(d.Box,{Size=Vector2.new(boxWidth,boxHeight),Position=boxPos,Visible=true}) else SafeHide(d.Box) end
                 if Cfg.ESP.Names then SafeSet(d.Name,{Text=model.Name.." ["..math.floor(dist).."m]",Position=Vector2.new(rootPos.X,boxPos.Y-20),Visible=true}) else SafeHide(d.Name) end
+                if Cfg.ESP.HeldTool then
+                    local tn=GetHeldTool(model)
+                    if tn then SafeSet(d.Tool,{Text="["..tn.."]",Position=Vector2.new(rootPos.X,boxPos.Y-35),Visible=true}) else SafeHide(d.Tool) end
+                else SafeHide(d.Tool) end
                 if Cfg.ESP.Tracers then SafeSet(d.Tracer,{From=Vector2.new(Cam.ViewportSize.X/2,Cam.ViewportSize.Y),To=Vector2.new(rootPos.X,bottomPos.Y),Visible=true}) else SafeHide(d.Tracer) end
                 if Cfg.ESP.HP then
                     local hum=model:FindFirstChildOfClass("Humanoid")
@@ -829,7 +875,7 @@ end
 -- CLEAN ESP / AIM RENDER LOOP
 -- Reuses one Drawing pool per player and updates visual data at 30 FPS.
 -- ============================================================
-AC(RunService.RenderStepped:Connect(function()
+AC(RunService.RenderStepped:Connect(function(dt)
     local vs=Cam.ViewportSize
     local cx,cy=vs.X/2,vs.Y/2
     UpdateFOVCircle()
@@ -859,7 +905,8 @@ AC(RunService.RenderStepped:Connect(function()
         return
     end
     local now=os.clock()
-    if now-_espLastUpdate<_espInterval then return end
+    local syncInterval=Cfg.Settings.VSync and math.max(tonumber(dt) or 1/60,1/240) or _espInterval
+    if now-_espLastUpdate<syncInterval then return end
     _espLastUpdate=now
     local vsY=vs.Y
     if Cfg.ESP.Mode=="Deadline" then
@@ -890,8 +937,10 @@ AC(RunService.RenderStepped:Connect(function()
             bx,by,bw,bh=GetBounds(char)
         end
         local visible=(not Cfg.ESP.WallCheck) or IsVisibleCached(player,char)
+        local radarAllowed=not Cfg.ESP.RadarEnabled or Cfg.ESP.RadarTarget=="" or player.Name==Cfg.ESP.RadarTarget
         local allowed=(not Cfg.ESP.TeamCheck or not SameTeam(player))
             and (not next(Cfg.ESP.TrackList) or Cfg.ESP.TrackList[player.Name])
+            and radarAllowed
         local show=dist<=Cfg.ESP.MaxDist and visible and allowed and bx~=nil
 
         if show then
@@ -1090,22 +1139,30 @@ local function SetHubFocus(open)
             end)
         end
     else
-        UIS.MouseBehavior=Enum.MouseBehavior.LockCenter
-        UIS.MouseIconEnabled=false
+        -- Nunca ocultar ou prender o cursor ao minimizar a interface.
+        pcall(function() UIS.MouseBehavior=Enum.MouseBehavior.Default end)
+        pcall(function() UIS.MouseIconEnabled=true end)
     end
 end
-SetHubFocus(true)
 
 local Tabs={
+    Home=Window:AddTab({Title="Home",Icon="house"}),
     Combat=Window:AddTab({Title="Combat",Icon="crosshair"}),
     Visuals=Window:AddTab({Title="Visuals",Icon="eye"}),
+    Radar=Window:AddTab({Title="Radar",Icon="scan-line"}),
     Misc=Window:AddTab({Title="Misc",Icon="settings-2"}),
     Spawn=Window:AddTab({Title="Spawn",Icon="package"}),
     Binds=Window:AddTab({Title="Binds",Icon="keyboard"}),
+    Saves=Window:AddTab({Title="Saves",Icon="save"}),
     Settings=Window:AddTab({Title="Settings",Icon="settings"}),
     Credits=Window:AddTab({Title="Credits",Icon="heart"})
 }
 local Options=Fluent.Options
+Tabs.Home:AddSection("223JHUB 2.5")
+Tabs.Home:AddParagraph({Title="Bem-vindo ao 223JHUB 2.5",Content="Interface Fluent para utilidades visuais, combate e gerenciamento de configuracoes."})
+Tabs.Home:AddParagraph({Title="Creditos",Content="Criado por Bruno223j e TY | Revolutionari'us Group"})
+Tabs.Home:AddParagraph({Title="Atualizacao",Content="Versao 2.5 com Saves, prioridade de foco, radar de alvo unico, taxa configur?vel do ESP e otimiza??o de ciclos."})
+Tabs.Home:AddParagraph({Title="Estado",Content="As listas de jogadores e ferramentas s?o carregadas somente quando voc? solicita."})
 _G._223HUB_ToggleMenu=function()
     _hubMenuOpen=not _hubMenuOpen
     pcall(function() Window:Minimize() end)
@@ -1153,6 +1210,32 @@ T(Tabs.Combat,"AimTeam","Team Check",function() return Cfg.Aim.TeamCheck end,fun
 S(Tabs.Combat,"PredStrength","Prediction Strength",1,20,3,function(v) Cfg.Aim.PredStr=v end)
 S(Tabs.Combat,"Smooth","Smoothness",1,100,8,function(v) Cfg.Aim.Smoothness=v end)
 S(Tabs.Combat,"AimStrength","Aim Strength",1,100,70,function(v) Cfg.Aim.AimStrength=v end)
+T(Tabs.Combat,"FocusPriorityEnabled","Enable Focus Priority",function() return Cfg.Aim.FocusPriorityEnabled end,function(v) Cfg.Aim.FocusPriorityEnabled=v end)
+Tabs.Combat:AddDropdown("FocusPriority",{Title="Focus Priority",Values={"Closest","Farthest","Most Health","Least Health"},Multi=false,Default=1,Callback=function(v) Cfg.Aim.FocusPriority=v end})
+Tabs.Combat:AddSection("Aim Exclusion List")
+local aimExcludeNames={"Press Load Players"}; local aimExcludeSelected=nil; local aimExcludeMap={}
+local function RefreshAimExcludeList()
+    aimExcludeNames={}; aimExcludeMap={}
+    if type(Cfg.Aim.Blacklist)~="table" then Cfg.Aim.Blacklist={} end
+    for _,p in ipairs(Players:GetPlayers()) do
+        if p~=LP then
+            local label=(Cfg.Aim.Blacklist[p.Name]==true and "[IGNORADO] " or "[PERMITIDO] ")..p.Name
+            aimExcludeNames[#aimExcludeNames+1]=label; aimExcludeMap[label]=p.Name
+        end
+    end
+    if #aimExcludeNames==0 then aimExcludeNames={"No players found"} end
+    if Options.AimExcludeList then Options.AimExcludeList:SetValues(aimExcludeNames) end
+end
+Tabs.Combat:AddDropdown("AimExcludeList",{Title="Players / status",Values=aimExcludeNames,Multi=false,Default=1,Callback=function(v) aimExcludeSelected=aimExcludeMap[v] or v end})
+Tabs.Combat:AddButton({Title="Load Players",Callback=RefreshAimExcludeList})
+Tabs.Combat:AddButton({Title="Add / Remove Exclusion",Callback=function()
+    if not aimExcludeSelected or aimExcludeSelected=="No players found" or aimExcludeSelected=="Press Load Players" then return end
+    if type(Cfg.Aim.Blacklist)~="table" then Cfg.Aim.Blacklist={} end
+    Cfg.Aim.Blacklist[aimExcludeSelected]=not (Cfg.Aim.Blacklist[aimExcludeSelected]==true)
+    local state=Cfg.Aim.Blacklist[aimExcludeSelected] and "ignored" or "allowed"
+    RefreshAimExcludeList()
+    Fluent:Notify({Title="Aimbot exclusion",Content=aimExcludeSelected.." = "..state,Duration=2})
+end})
 local AimLockBind
 local aimBindWaiting=false
 local function AimBindLabel()
@@ -1208,6 +1291,8 @@ T(Tabs.Visuals,"Distance","Distance",function() return Cfg.ESP.Dist end,function
 T(Tabs.Visuals,"TeamCheck","Team Check",function() return Cfg.ESP.TeamCheck end,function(v) Cfg.ESP.TeamCheck=v end)
 T(Tabs.Visuals,"Skeleton","Skeleton",function() return Cfg.ESP.Skeleton end,function(v) Cfg.ESP.Skeleton=v end)
 S(Tabs.Visuals,"MaxDistance","Max Distance",50,10000,500,function(v) Cfg.ESP.MaxDist=v end)
+S(Tabs.Visuals,"ESPUpdateRate","ESP Update Rate (FPS)",1,60,30,function(v) Cfg.ESP.UpdateRate=v; _espInterval=1/math.max(v,1) end)
+T(Tabs.Visuals,"HeldTool","Show Item in Hand",function() return Cfg.ESP.HeldTool end,function(v) Cfg.ESP.HeldTool=v end)
 local ESPColors={Red=Color3.fromRGB(220,40,40),Blue=Color3.fromRGB(40,130,240),Purple=Color3.fromRGB(160,50,220),Yellow=Color3.fromRGB(230,190,40),White=Color3.fromRGB(255,255,255)}
 Tabs.Visuals:AddDropdown("ESPColor",{Title="ESP Color",Values={"Red","Blue","Purple","Yellow","White"},Multi=false,Default=1,Callback=function(v)
     local c=ESPColors[v]
@@ -1255,6 +1340,64 @@ end})
 Tabs.Spawn:AddButton({Title="Grab Nearest Tool",Callback=function() GrabNearestTool() end})
 -- Tools are scanned only after the user presses Load Tools.
 
+-- Aba Saves: opera??es locais compat?veis com writefile/readfile/listfiles.
+local saveNames={}; local selectedSave=nil
+local function RefreshSaveList()
+    saveNames=ListCfgs()
+    if #saveNames==0 then saveNames={"No saves found"} end
+    if Options.SaveList then Options.SaveList:SetValues(saveNames) end
+end
+Tabs.Saves:AddSection("Configuration Manager")
+Tabs.Saves:AddInput("SaveName",{Title="Save name",Placeholder="my_config",Default="",Callback=function(v) end})
+Tabs.Saves:AddDropdown("SaveList",{Title="Saved configurations",Values={"Press Refresh"},Multi=false,Default=1,Callback=function(v) selectedSave=v end})
+Tabs.Saves:AddButton({Title="Refresh Saves",Callback=RefreshSaveList})
+Tabs.Saves:AddButton({Title="Save Current",Callback=function()
+    local name=(Options.SaveName and Options.SaveName.Value or ""):gsub("%s+","_")
+    if name=="" then Fluent:Notify({Title="Saves",Content="Digite um nome.",Duration=2}); return end
+    local ok,msg=SaveCfg(name); Fluent:Notify({Title="Saves",Content=ok and "Configuracao salva." or tostring(msg),Duration=2}); RefreshSaveList()
+end})
+Tabs.Saves:AddButton({Title="Load Selected",Callback=function()
+    if not selectedSave or selectedSave=="No saves found" then return end
+    local ok,msg=LoadCfg(selectedSave); Fluent:Notify({Title="Saves",Content=ok and "Configuracao carregada." or tostring(msg),Duration=2})
+end})
+Tabs.Saves:AddButton({Title="Delete Selected",Callback=function()
+    if not selectedSave or selectedSave=="No saves found" then return end
+    DelCfg(selectedSave); selectedSave=nil; RefreshSaveList()
+end})
+Tabs.Saves:AddSection("Import / Export")
+Tabs.Saves:AddInput("ImportJson",{Title="JSON to import",Placeholder="Cole o JSON exportado",Default="",Callback=function(v) end})
+Tabs.Saves:AddButton({Title="Import JSON",Callback=function()
+    local raw=Options.ImportJson and Options.ImportJson.Value or ""
+    local ok,data=pcall(function() return HttpService:JSONDecode(raw) end)
+    if ok and type(data)=="table" then ApplySave(data); Fluent:Notify({Title="Saves",Content="JSON importado.",Duration=2}) else Fluent:Notify({Title="Saves",Content="JSON invalido.",Duration=2}) end
+end})
+Tabs.Saves:AddButton({Title="Export JSON",Callback=function()
+    local raw=SerCfg()
+    if setclipboard then pcall(setclipboard,raw); Fluent:Notify({Title="Saves",Content="JSON copiado para a area de transfer?ncia.",Duration=2}) else Fluent:Notify({Title="Saves",Content="setclipboard indisponivel.",Duration=2}) end
+end})
+
+-- Radar: lista carregada manualmente e um alvo por vez.
+local radarNames={"Press Load Players"}; local radarSelected=nil; local radarMap={}
+local function RefreshRadarList()
+    radarNames={}; radarMap={}
+    for _,p in ipairs(Players:GetPlayers()) do
+        if p~=LP then
+            local label=(Cfg.ESP.RadarTarget==p.Name and "[RASTREANDO] " or "[DISPONIVEL] ")..p.Name
+            radarNames[#radarNames+1]=label; radarMap[label]=p.Name
+        end
+    end
+    if #radarNames==0 then radarNames={"No players found"} end
+    if Options.RadarList then Options.RadarList:SetValues(radarNames) end
+end
+Tabs.Radar:AddSection("Single Target Radar")
+T(Tabs.Radar,"RadarEnabled","Enable Radar Filter",function() return Cfg.ESP.RadarEnabled end,function(v) Cfg.ESP.RadarEnabled=v end)
+Tabs.Radar:AddDropdown("RadarList",{Title="Target / status",Values=radarNames,Multi=false,Default=1,Callback=function(v) radarSelected=radarMap[v] or v end})
+Tabs.Radar:AddButton({Title="Load Players",Callback=RefreshRadarList})
+Tabs.Radar:AddButton({Title="Track Selected",Callback=function()
+    if radarSelected and radarSelected~="No players found" and radarSelected~="Press Load Players" then Cfg.ESP.RadarTarget=radarSelected; Cfg.ESP.RadarEnabled=true; RefreshRadarList() end
+end})
+Tabs.Radar:AddButton({Title="Clear Radar Target",Callback=function() Cfg.ESP.RadarTarget=""; Cfg.ESP.RadarEnabled=false end})
+
 Tabs.Binds:AddSection("Menu and Systems")
 BindButton(Tabs.Binds,"Toggle Menu",function() return Cfg.Settings.ToggleKeyName end,function(k,n) Cfg.Settings.ToggleKey=k; Cfg.Settings.ToggleKeyName=n end)
 BindButton(Tabs.Binds,"ESP Toggle",function() return Cfg.Settings.ESPKeyName end,function(k,n) Cfg.Settings.ESPKey=k; Cfg.Settings.ESPKeyName=n end)
@@ -1266,7 +1409,9 @@ Tabs.Binds:AddParagraph({Title="Mouse support",Content="All bind selectors accep
 
 Tabs.Settings:AddSection("Control")
 T(Tabs.Settings,"BlockGameInput","Block game interaction while menu is open",function() return Cfg.Settings.BlockGameInput end,function(v) Cfg.Settings.BlockGameInput=v; SetHubFocus(_hubMenuOpen) end)
+T(Tabs.Settings,"VSync","VSync - sync ESP with game FPS",function() return Cfg.Settings.VSync end,function(v) Cfg.Settings.VSync=v; _espLastUpdate=0 end)
 local function ShutdownHub()
+    if _hubShutdown then return end
     -- Stop every feature first.
     Cfg.ESP.Enabled=false; Cfg.Aim.Aimbot=false; Cfg.Trigger.Enabled=false
     Cfg.Misc.Fly=false; Cfg.Misc.Noclip=false; Cfg.Misc.Speed=false; Cfg.Misc.JumpMod=false; Cfg.Misc.HitboxExtender=false
@@ -1275,15 +1420,26 @@ local function ShutdownHub()
     -- Remove both ESP pools, including Deadline models not represented by Players.
     pcall(function() for player in pairs(ESPO) do KillESP(player) end end)
     pcall(function() for model in pairs(DeadlineDrawings) do DestroyDeadlineESP(model) end end)
+    Cfg.Aim.ShowFOV=false
+    _fovLastVis=false
+    pcall(function()
+        for _,ln in ipairs(_fovLines) do
+            if ln then ln.Visible=false; ln:Remove(); DrawPool[ln]=nil end
+        end
+    end)
     -- Disconnect every connection registered through AC.
     pcall(function() for _,conn in ipairs(_conns) do if conn then conn:Disconnect() end end end)
     pcall(function() CAS:UnbindAction(_hubBlockAction) end)
     pcall(function() Fluent:Unload() end)
+    pcall(function() if _GuiParent and _GuiParent:FindFirstChild("223TYHUB") then _GuiParent:FindFirstChild("223TYHUB"):Destroy() end end)
     pcall(function() UIS.MouseBehavior=Enum.MouseBehavior.Default; UIS.MouseIconEnabled=true end)
+    _hubShutdown=true
     pcall(function() if _G._223HUB_Kill then _G._223HUB_Kill() end end)
     _G._223HUB_ToggleMenu=nil
     _G._223HUB_Kill=nil
+    _G._223HUB_Shutdown=nil
 end
+_G._223HUB_Shutdown=ShutdownHub
 Tabs.Settings:AddButton({Title="Unload 223JHUB",Callback=ShutdownHub})
 Tabs.Settings:AddParagraph({Title="Shutdown",Content="Stops all systems, disconnects events and removes the interface."})
 Tabs.Settings:AddSection("About")
@@ -1295,6 +1451,12 @@ Tabs.Credits:AddParagraph({Title="Discord",Content="bruno223j & frty2017"})
 Tabs.Credits:AddParagraph({Title="Final Edition",Content="ESP, controls and cleanup finalized."})
 Window:SelectTab(1)
 Fluent:Notify({Title="223JHUB 2.0",Content="Fluent interface loaded.",Duration=4})
+-- O Fluent pode alterar o foco durante a montagem; aplica o estado final depois disso.
+task.defer(function()
+    SetHubFocus(_hubMenuOpen)
+    pcall(function() UIS.MouseBehavior=Enum.MouseBehavior.Default end)
+    pcall(function() UIS.MouseIconEnabled=true end)
+end)
 
 print("[223JHUB 2.0 RELEASE]  LOADED | BRUNO223J & TY | DISCORD | bruno223j | frty2017 | Toggle=[;]")
 
