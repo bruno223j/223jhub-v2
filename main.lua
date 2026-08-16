@@ -189,7 +189,7 @@ local Cfg = {
     Misc = {
         Fly=false, FlySpeed=50, FlyBoost=false, Noclip=false,
         Speed=false, WalkSpeed=25, AntiAFK=false,
-        HitboxExtender=false, HitboxSize=8, HitboxPart="All",
+        HitboxExtender=false, TeamCheck=false, HitboxSize=8, HitboxPart="All",
         JumpMod=false, JumpPower=80, JumpMethod="JumpPower",
         InfJump=false, AntiRag=false, ClickTp=false, SpinBot=false,
         CrashLag=false, AutoJump=false,
@@ -815,6 +815,7 @@ local function RestoreHitbox(p)
 end
 local function ApplyHBChar(p,char)
     if not p or not char or not Cfg.Misc.HitboxExtender then return end
+    if Cfg.Misc.TeamCheck and SameTeam(p) then return end
     local pset=HBP_SETS[Cfg.Misc.HitboxPart] or HBP_SETS.All
     local size=math.clamp(tonumber(Cfg.Misc.HitboxSize) or 8,2,80)
     local originals=_hbOriginals[p] or {}; _hbOriginals[p]=originals
@@ -1212,8 +1213,8 @@ end))
 -- GUI Fluent
 local Fluent=loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 local Window=Fluent:CreateWindow({
-    Title="223JHUB 2.0",
-    SubTitle="223JHUB 2.0 | Fluent Edition",
+    Title="223JHUB",
+    SubTitle="223JHUB 2.5 | revolucionari'us",
     TabWidth=160,
     Size=UDim2.fromOffset(760,560),
     Acrylic=false,
@@ -1398,6 +1399,7 @@ T(Tabs.Combat,"TriggerTeam","Team Check",function() return Cfg.Trigger.TeamCheck
 S(Tabs.Combat,"TriggerDelay","Delay (ms)",0,1000,80,function(v) Cfg.Trigger.Delay=v end)
 Tabs.Combat:AddSection("Hitbox Extender")
 T(Tabs.Combat,"Hitbox","Enable Hitbox",function() return Cfg.Misc.HitboxExtender end,function(v) Cfg.Misc.HitboxExtender=v; RefreshHitboxes() end)
+T(Tabs.Combat,"HitboxTeamCheck","Team Check",function() return Cfg.Misc.TeamCheck end,function(v) Cfg.Misc.TeamCheck=v; RefreshHitboxes() end)
 Tabs.Combat:AddDropdown("HitboxPart",{Title="Hitbox Part",Values={"All","Head","Torso","Arms","Legs","HRP"},Multi=false,Default=Cfg.Misc.HitboxPart,Callback=function(v)
     if HBP_SETS[v] then Cfg.Misc.HitboxPart=v; if Cfg.Misc.HitboxExtender then RefreshHitboxes() end end
 end})
@@ -1586,9 +1588,9 @@ _G._223HUB_Shutdown=ShutdownHub
 Tabs.Settings:AddButton({Title="Unload 223JHUB",Callback=ShutdownHub})
 Tabs.Settings:AddParagraph({Title="Shutdown",Content="Stops all systems, disconnects events and removes the interface."})
 Tabs.Settings:AddSection("About")
-Tabs.Settings:AddParagraph({Title="Credits",Content="223JHUB 2.0 | Script by Bruno223J and TY | Revolutionarius Group"})
+Tabs.Settings:AddParagraph({Title="Credits",Content="223JHUB 2.5 | Script by Bruno223J and TY | Revolutionarius Group"})
 Tabs.Settings:AddParagraph({Title="Fluent UI",Content="Interface powered by Fluent UI Library."})
-Tabs.Credits:AddSection("223JHUB 2.0")
+Tabs.Credits:AddSection("223JHUB 2.5")
 Tabs.Credits:AddParagraph({Title="Developers",Content="Bruno223j and TY"})
 Tabs.Credits:AddParagraph({Title="Discord",Content="bruno223j & frty2017"})
 Tabs.Credits:AddParagraph({Title="Final Edition",Content="ESP, controls and cleanup finalized."})
@@ -1601,7 +1603,7 @@ task.defer(function()
     pcall(function() UIS.MouseIconEnabled=true end)
 end)
 
-print("[223JHUB 2.0 RELEASE]  LOADED | BRUNO223J & TY | DISCORD | bruno223j | frty2017 | Toggle=[;]")
+print("[223JHUB 2.5 RELEASE]  LOADED | BRUNO223J & TY | DISCORD | bruno223j | frty2017 | Toggle=[;]")
 
 end -- fim de _223JHUB_MAIN()
 
