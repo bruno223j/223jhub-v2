@@ -173,12 +173,14 @@ local Cfg = {
         DistColor=Color3.fromRGB(200,200,200), HPColor=Color3.fromRGB(0,255,0),
         HPBgColor=Color3.fromRGB(60,0,0), ToolColor=Color3.fromRGB(255,210,50),
         Skeleton=false, SkelColor=Color3.fromRGB(0,220,255), Mode="Default (Universal)",
-        UpdateRate=30, RadarEnabled=false, RadarTarget="",
+                UpdateRate=30, RadarEnabled=false, RadarTarget="", RadarHighlight=false, RadarColorName="Yellow", ESPColorName="Red",
+
     },
     Aim = {
         Aimbot=false, AimbotType="Default (Universal)", WallCheck=false, TeamCheck=false,
         Prediction=false, PredStr=3,
-        FOV=150, ShowFOV=false, UseFOV=false, FOVFollow=false,
+        FOV=150, ShowFOV=false, UseFOV=false, FOVFollow=false, CameraFollow=false,
+        MaxDistanceEnabled=false, MaxDistance=500, FOVColorName="Red",
         AimPart="Head", Smoothness=8,
         AimKey=Enum.KeyCode.E, AimKeyName="E",
         AimStrength=70, Blacklist={}, FocusPriorityEnabled=false, FocusPriority="Closest",
@@ -480,6 +482,9 @@ local function ClosestTarget()
         if not onScreen then continue end
         local screenDist=(sp-center).Magnitude
         if Cfg.Aim.UseFOV and screenDist>Cfg.Aim.FOV then continue end
+        local localRoot=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+        local worldDistance=localRoot and (part.Position-localRoot.Position).Magnitude or math.huge
+        if Cfg.Aim.MaxDistanceEnabled and worldDistance>Cfg.Aim.MaxDistance then continue end
         local hum=c:FindFirstChildOfClass("Humanoid")
         local health=hum and hum.Health or 0
         local score=screenDist
@@ -574,6 +579,8 @@ local _fovLastR   = -1
 local _fovLastCX  = -1
 local _fovLastCY  = -1
 local _fovLastVis = nil
+local _fovLastColor = nil
+local FOVColors={Red=Color3.fromRGB(220,40,40),Blue=Color3.fromRGB(40,130,240),Purple=Color3.fromRGB(160,50,220),Yellow=Color3.fromRGB(230,190,40),White=Color3.fromRGB(255,255,255)}
 
 -- OTIMIZAO: pre-calcula ngulos do FOV uma nica vez
 local _fovCos = {}
@@ -593,17 +600,19 @@ local function UpdateFOVCircle()
         local vs = Cam.ViewportSize
         cx, cy = vs.X/2, vs.Y/2
     end
-    local r = Cfg.Aim.FOV
-
-    if show == _fovLastVis and r == _fovLastR and math.abs(cx-_fovLastCX)<0.5 and math.abs(cy-_fovLastCY)<0.5 then
+        local r = Cfg.Aim.FOV
+    local colorName=Cfg.Aim.FOVColorName or "Red"
+    if show == _fovLastVis and r == _fovLastR and math.abs(cx-_fovLastCX)<0.5 and math.abs(cy-_fovLastCY)<0.5 and colorName==_fovLastColor then
         return
     end
-    _fovLastVis=show; _fovLastR=r; _fovLastCX=cx; _fovLastCY=cy
+    _fovLastVis=show; _fovLastR=r; _fovLastCX=cx; _fovLastCY=cy; _fovLastColor=colorName
 
     for i=1, FOV_SEGS do
         local ln = _fovLines[i]
-        if not ln then continue end
+                if not ln then continue end
+        local fovColor=FOVColors[Cfg.Aim.FOVColorName] or FOVColors.Red
         pcall(function()
+            ln.Color=fovColor
             ln.From    = Vector2.new(cx + _fovCos[i][1]*r, cy + _fovSin[i][1]*r)
             ln.To      = Vector2.new(cx + _fovCos[i][2]*r, cy + _fovSin[i][2]*r)
             ln.Visible = show
@@ -924,7 +933,8 @@ local function UpdateDeadlineESP()
             local d=MakeDeadlineESP(model)
             local rootPos,onScreen=Cam:WorldToViewportPoint(root.Position)
             local player=DeadlinePlayer(model)
-            local radarAllowed=not Cfg.ESP.RadarEnabled or Cfg.ESP.RadarTarget=="" or (player and player.Name==Cfg.ESP.RadarTarget) or model.Name==Cfg.ESP.RadarTarget
+            local radarFilter=Cfg.ESP.RadarEnabled and not Cfg.ESP.RadarHighlight
+            local radarAllowed=not radarFilter or Cfg.ESP.RadarTarget=="" or (player and player.Name==Cfg.ESP.RadarTarget) or model.Name==Cfg.ESP.RadarTarget
             local allowed=(not Cfg.ESP.TeamCheck or not player or not SameTeam(player)) and radarAllowed
             local dist=localPos and (root.Position-localPos).Magnitude or 0
             local visible=not Cfg.ESP.WallCheck or DeadlineVisible(model,root)
@@ -937,13 +947,15 @@ local function UpdateDeadlineESP()
                 local boxHeight=math.abs(topPos.Y-bottomPos.Y)
                 local boxWidth=boxHeight*0.6
                 local boxPos=Vector2.new(rootPos.X-boxWidth/2,math.min(topPos.Y,bottomPos.Y))
-                if Cfg.ESP.Box then SafeSet(d.Box,{Size=Vector2.new(boxWidth,boxHeight),Position=boxPos,Visible=true}) else SafeHide(d.Box) end
-                if Cfg.ESP.Names then SafeSet(d.Name,{Text=model.Name.." ["..math.floor(dist).."m]",Position=Vector2.new(rootPos.X,boxPos.Y-20),Visible=true}) else SafeHide(d.Name) end
+                local radarFocus=Cfg.ESP.RadarHighlight and Cfg.ESP.RadarTarget~="" and player and player.Name==Cfg.ESP.RadarTarget
+                local radarColor=FOVColors[Cfg.ESP.RadarColorName] or FOVColors.Yellow
+                if Cfg.ESP.Box then SafeSet(d.Box,{Size=Vector2.new(boxWidth,boxHeight),Position=boxPos,Color=radarFocus and radarColor or Color3.fromRGB(0,255,255),Visible=true}) else SafeHide(d.Box) end
+                if Cfg.ESP.Names then SafeSet(d.Name,{Text=model.Name.." ["..math.floor(dist).."m]",Position=Vector2.new(rootPos.X,boxPos.Y-20),Color=radarFocus and radarColor or Color3.fromRGB(255,255,100),Visible=true}) else SafeHide(d.Name) end
                 if Cfg.ESP.HeldTool then
                     local tn=GetHeldTool(model)
                     if tn then SafeSet(d.Tool,{Text="["..tn.."]",Position=Vector2.new(rootPos.X,boxPos.Y-35),Visible=true}) else SafeHide(d.Tool) end
                 else SafeHide(d.Tool) end
-                if Cfg.ESP.Tracers then SafeSet(d.Tracer,{From=Vector2.new(Cam.ViewportSize.X/2,Cam.ViewportSize.Y),To=Vector2.new(rootPos.X,bottomPos.Y),Visible=true}) else SafeHide(d.Tracer) end
+                if Cfg.ESP.Tracers then SafeSet(d.Tracer,{From=Vector2.new(Cam.ViewportSize.X/2,Cam.ViewportSize.Y),To=Vector2.new(rootPos.X,bottomPos.Y),Color=radarFocus and radarColor or Color3.fromRGB(255,0,0),Visible=true}) else SafeHide(d.Tracer) end
                 if Cfg.ESP.HP then
                     local hum=model:FindFirstChildOfClass("Humanoid")
                     local hp=hum and hum.Health or 0
@@ -964,6 +976,7 @@ end
 -- CLEAN ESP / AIM RENDER LOOP
 -- Reuses one Drawing pool per player and updates visual data at 30 FPS.
 -- ============================================================
+local _aimLockedTarget=nil
 AC(RunService.RenderStepped:Connect(function(dt)
     local frameStart=os.clock()
     local vs=Cam.ViewportSize
@@ -978,11 +991,19 @@ AC(RunService.RenderStepped:Connect(function(dt)
         aimHeld=_G._scrollAimPulse; _G._scrollAimPulse=false
     end
     if Cfg.Aim.Aimbot and aimHeld then
-        local target=ClosestTarget()
+        local target
+        -- Quando Camera Follow está ativo, mantém o último alvo válido mesmo após sair do FOV.
+        if Cfg.Aim.CameraFollow and _aimLockedTarget and IsValidTarget(_aimLockedTarget) then
+            target=_aimLockedTarget
+        else
+            target=ClosestTarget()
+            if Cfg.Aim.CameraFollow then _aimLockedTarget=target end
+        end
         local targetChar=target and target.Character
         local part=targetChar and (targetChar:FindFirstChild(Cfg.Aim.AimPart) or targetChar:FindFirstChild("HumanoidRootPart"))
         if target and targetChar and part then
             aimTargeted=true
+            if Cfg.Aim.CameraFollow then _aimLockedTarget=target end
             local pos=part.Position
             if Cfg.Aim.Prediction then
                 local hrp=targetChar:FindFirstChild("HumanoidRootPart") or part
@@ -991,7 +1012,10 @@ AC(RunService.RenderStepped:Connect(function(dt)
             local alpha=math.clamp(math.clamp(Cfg.Aim.AimStrength/100,0.01,1)*math.clamp((101-Cfg.Aim.Smoothness)/100,0.01,1),0.005,1)
             Cam.CFrame=Cam.CFrame:Lerp(CFrame.new(Cam.CFrame.Position,pos),alpha)
         end
+    else
+        _aimLockedTarget=nil
     end
+    if not Cfg.Aim.CameraFollow or not aimHeld then _aimLockedTarget=nil end
     DiagModule("Aimbot",not Cfg.Aim.Aimbot and "disabled" or (aimTargeted and "active" or "idle"),nil,os.clock()-aimStart)
 
     local espStart=os.clock()
@@ -1038,7 +1062,8 @@ AC(RunService.RenderStepped:Connect(function(dt)
             bx,by,bw,bh=GetBounds(char)
         end
         local visible=(not Cfg.ESP.WallCheck) or IsVisibleCached(player,char)
-        local radarAllowed=not Cfg.ESP.RadarEnabled or Cfg.ESP.RadarTarget=="" or player.Name==Cfg.ESP.RadarTarget
+        local radarFilter=Cfg.ESP.RadarEnabled and not Cfg.ESP.RadarHighlight
+        local radarAllowed=not radarFilter or Cfg.ESP.RadarTarget=="" or player.Name==Cfg.ESP.RadarTarget
         local allowed=(not Cfg.ESP.TeamCheck or not SameTeam(player))
             and (not next(Cfg.ESP.TrackList) or Cfg.ESP.TrackList[player.Name])
             and radarAllowed
@@ -1046,11 +1071,13 @@ AC(RunService.RenderStepped:Connect(function(dt)
 
         if show then
             local x,y,w,h=bx,by,bw,bh
-            local boxColor=deadlineMode and Color3.fromRGB(0,255,255) or Cfg.ESP.BoxColor
-            local nameColor=deadlineMode and Color3.fromRGB(255,255,100) or Cfg.ESP.NameColor
-            local tracerColor=deadlineMode and Color3.fromRGB(255,0,0) or Cfg.ESP.TracerColor
+            local radarFocus=Cfg.ESP.RadarHighlight and Cfg.ESP.RadarTarget~="" and player and player.Name==Cfg.ESP.RadarTarget
+            local radarColor=FOVColors[Cfg.ESP.RadarColorName] or FOVColors.Yellow
+            local boxColor=radarFocus and radarColor or (deadlineMode and Color3.fromRGB(0,255,255) or Cfg.ESP.BoxColor)
+            local nameColor=radarFocus and radarColor or (deadlineMode and Color3.fromRGB(255,255,100) or Cfg.ESP.NameColor)
+            local tracerColor=radarFocus and radarColor or (deadlineMode and Color3.fromRGB(255,0,0) or Cfg.ESP.TracerColor)
             if Cfg.ESP.Box then SafeSet(d.Box,{Position=Vector2.new(x,y),Size=Vector2.new(w,h),Color=boxColor,Transparency=0.7,Visible=true}) else SafeHide(d.Box) end
-            if Cfg.ESP.Fill then SafeSet(d.Fill,{Position=Vector2.new(x,y),Size=Vector2.new(w,h),Color=Cfg.ESP.FillColor,Transparency=0.7,Visible=true}) else SafeHide(d.Fill) end
+            if Cfg.ESP.Fill then SafeSet(d.Fill,{Position=Vector2.new(x,y),Size=Vector2.new(w,h),Color=radarFocus and radarColor or Cfg.ESP.FillColor,Transparency=0.7,Visible=true}) else SafeHide(d.Fill) end
             if Cfg.ESP.Names then SafeSet(d.Name,{Position=Vector2.new(x+w/2,y-18),Text=player.DisplayName,Color=nameColor,Visible=true}) else SafeHide(d.Name) end
             if Cfg.ESP.Dist then SafeSet(d.Dist,{Position=Vector2.new(x+w/2,y+h+4),Text=math.floor(dist).."m",Color=Cfg.ESP.DistColor,Visible=true}) else SafeHide(d.Dist) end
             if Cfg.ESP.HP then
@@ -1216,7 +1243,14 @@ end))
 
 -- ============================================================
 -- GUI Fluent
-local Fluent=loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local _fluentSource=game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua")
+-- Mantém o dropdown como popup independente, com altura limitada e reposicionamento automático conforme o espaço disponível.
+_fluentSource=_fluentSource:gsub("BackgroundTransparency=1,Size=UDim2.new(1,0,0,300),Position=UDim2.fromOffset(0,42),Parent=m.Frame,Visible=false","BackgroundTransparency=1,Size=UDim2.fromOffset(170,300),Parent=h.Library.GUI,Visible=false")
+_fluentSource=_fluentSource:gsub("local w,x=function()v.Position=UDim2.fromOffset(0,42)end,0","local w,x=function()local w=0 if ai.ViewportSize.Y-p.AbsolutePosition.Y<v.AbsoluteSize.Y-5 then w=v.AbsoluteSize.Y-5-(ai.ViewportSize.Y-p.AbsolutePosition.Y)+40 end v.Position=UDim2.fromOffset(p.AbsolutePosition.X-1,p.AbsolutePosition.Y-5-w)end,0")
+_fluentSource=_fluentSource:gsub("function l.Open(B)l.Opened=true A.ScrollingEnabled=false pcall(function()m.Frame.Size=UDim2.new(1,0,0,42+u.AbsoluteSize.Y)end)v.Position=UDim2.fromOffset(0,42)v.Visible=true","function l.Open(B)l.Opened=true A.ScrollingEnabled=false v.Visible=true")
+_fluentSource=_fluentSource:gsub("function l.Close(B)l.Opened=false A.ScrollingEnabled=true pcall(function()m.Frame.Size=UDim2.new(1,0,0,42)end)u.Size=UDim2.fromScale(1,0.6)v.Visible=false","function l.Close(B)l.Opened=false A.ScrollingEnabled=true u.Size=UDim2.fromScale(1,0.6)v.Visible=false")
+_fluentSource=_fluentSource:gsub("local y,z=function()if#l.Values>10 then v.Size=UDim2.fromOffset(x,392)else v.Size=UDim2.fromOffset(x,s.AbsoluteContentSize.Y+10)end end","local y,z=function()local maxH=math.max(120,math.min(392,ai.ViewportSize.Y-32))if#l.Values>10 then v.Size=UDim2.fromOffset(x,maxH)else v.Size=UDim2.fromOffset(x,math.min(s.AbsoluteContentSize.Y+10,maxH))end end")
+local Fluent=loadstring(_fluentSource)()
 local Window=Fluent:CreateWindow({
     Title="223JHUB",
     SubTitle="223JHUB 2.5 | revolucionari'us",
@@ -1226,6 +1260,17 @@ local Window=Fluent:CreateWindow({
     Theme="Dark",
     MinimizeKey=Enum.KeyCode.RightShift
 })
+-- Mantém dropdowns abertos dentro da área visível e evita que escapem pelas bordas.
+local function KeepDropdownsInsideViewport()
+    local frames=Fluent.OpenFrames
+    if type(frames)~="table" then return end
+    for _,frame in ipairs(frames) do
+        if frame and frame:IsA("GuiObject") and frame.Visible then
+            pcall(function() frame.ZIndex=100 end)
+        end
+    end
+end
+AC(RunService.RenderStepped:Connect(KeepDropdownsInsideViewport))
 local CAS=game:GetService("ContextActionService")
 local _hubMenuOpen=true
 local _hubBlockAction="223JHUB_BlockGameInput"
@@ -1258,6 +1303,7 @@ local Tabs={
     Binds=Window:AddTab({Title="Binds",Icon="keyboard"}),
     Saves=Window:AddTab({Title="Saves",Icon="save"}),
     Settings=Window:AddTab({Title="Settings",Icon="settings"}),
+    Custom=Window:AddTab({Title="Personalização",Icon="palette"}),
     Credits=Window:AddTab({Title="Credits",Icon="heart"})
 }
 local Options=Fluent.Options
@@ -1266,6 +1312,8 @@ Tabs.Home:AddParagraph({Title="Bem-vindo ao 223JHUB 2.5",Content="Interface Flue
 Tabs.Home:AddParagraph({Title="Creditos",Content="Criado por Bruno223j e TY | Revolutionari'us Group"})
 Tabs.Home:AddParagraph({Title="Atualizacao",Content="Versao 2.5 com Saves, prioridade de foco, radar de alvo unico, taxa configur?vel do ESP e otimiza??o de ciclos."})
 Tabs.Home:AddParagraph({Title="Estado",Content="As listas de jogadores e ferramentas s?o carregadas somente quando voc? solicita."})
+Tabs.Home:AddParagraph({Title="Novidades",Content="Camera Follow mantém o alvo acompanhado fora do FOV; Aimbot Distance limita a distância máxima; Radar Highlight destaca um alvo específico no ESP; a aba Personalização controla cores do ESP e do FOV."})
+Tabs.Home:AddParagraph({Title="Interface",Content="Dropdowns são tratados como menus expansíveis e as binds carregadas pelos saves são reaplicadas visualmente na GUI."})
 _G._223HUB_ToggleMenu=function()
     _hubMenuOpen=not _hubMenuOpen
     pcall(function() Window:Minimize() end)
@@ -1301,8 +1349,9 @@ local function NotifyBindConflicts()
     return conflicts
 end
 local waitingBind=false
+local _bindButtons={}
 local function BindButton(tab,title,getName,setBind)
-    tab:AddButton({Title=title..": ["..getName().."]",Callback=function()
+    local button=tab:AddButton({Title=title..": ["..getName().."]",Callback=function()
         if waitingBind then return end
         waitingBind=true
         Fluent:Notify({Title="Bind",Content="Pressione uma tecla ou Mouse1/Mouse2",Duration=3})
@@ -1319,17 +1368,49 @@ local function BindButton(tab,title,getName,setBind)
             elseif M5 and inp.UserInputType==M5 then code,name=M5,"Mouse5"
             elseif inp.UserInputType==Enum.UserInputType.MouseWheel then code,name=(inp.Position.Z>0 and "ScrollUp" or "ScrollDown"), (inp.Position.Z>0 and "ScrollUp" or "ScrollDown") end
             if code then
-                cn:Disconnect(); waitingBind=false; setBind(code,name); NotifyBindConflicts()
+                cn:Disconnect(); waitingBind=false; setBind(code,name)
+                pcall(function() if button and button.SetTitle then button:SetTitle(title..": ["..name.."]") end end)
+                NotifyBindConflicts()
                 Fluent:Notify({Title="Bind updated",Content=title.." = "..name,Duration=2})
             end
-        end)
+                end)
     end})
+    _bindButtons[title]={Button=button,GetName=getName}
+    return button
 end
-
+-- Seletor interno: não cria popup nem janela flutuante; o clique avança pelos valores no próprio painel.
+local function LocalSelect(tab,id,title,values,default,callback)
+    local state={Values=values or {},Value=nil,Index=1,Button=nil}
+    local function findIndex(value)
+        for i,v in ipairs(state.Values) do if v==value then return i end end
+        return 1
+    end
+    state.Index=type(default)=="number" and math.clamp(default,1,math.max(#state.Values,1)) or findIndex(default)
+    state.Value=state.Values[state.Index]
+    local function refresh()
+        local text=title..": ["..tostring(state.Value or "").."]"
+        if state.Button and state.Button.SetTitle then pcall(function() state.Button:SetTitle(text) end) end
+    end
+    local object={Value=state.Value}
+    function object:SetValue(value)
+        state.Index=findIndex(value); state.Value=state.Values[state.Index]; object.Value=state.Value; refresh(); if callback then callback(state.Value) end
+    end
+    function object:SetValues(newValues)
+        state.Values=newValues or {}; state.Index=math.clamp(state.Index,1,math.max(#state.Values,1)); state.Value=state.Values[state.Index]; object.Value=state.Value; refresh()
+    end
+    state.Button=tab:AddButton({Title=title..": ["..tostring(state.Value or "").."]",Callback=function()
+        if #state.Values==0 then return end
+        state.Index=(state.Index%#state.Values)+1; state.Value=state.Values[state.Index]; object.Value=state.Value; refresh(); if callback then callback(state.Value) end
+    end})
+    object.Button=state.Button
+    Options[id]=object
+    if callback and state.Value~=nil then callback(state.Value) end
+    return object
+end
 Tabs.Combat:AddSection("Aimbot")
 T(Tabs.Combat,"Aimbot","Enable Aimbot",function() return Cfg.Aim.Aimbot end,function(v) Cfg.Aim.Aimbot=v end)
-Tabs.Combat:AddDropdown("AimMode",{Title="Aimbot Mode",Values={"Default (Universal)","AR2"},Multi=false,Default=1,Callback=function(v) Cfg.Aim.AimbotType=v end})
-Tabs.Combat:AddDropdown("AimPart",{Title="Target Part",Values={"Head","HumanoidRootPart","Torso","UpperTorso"},Multi=false,Default=1,Callback=function(v) Cfg.Aim.AimPart=v end})
+Tabs.Combat:AddDropdown("AimMode",{Title="Aimbot Mode",Values={"Default (Universal)","AR2"},Multi=false,Default=Cfg.Aim.AimbotType,Callback=function(v) Cfg.Aim.AimbotType=v end})
+Tabs.Combat:AddDropdown("AimPart",{Title="Target Part",Values={"Head","HumanoidRootPart","Torso","UpperTorso"},Multi=false,Default=Cfg.Aim.AimPart,Callback=function(v) Cfg.Aim.AimPart=v end})
 T(Tabs.Combat,"AimPrediction","Prediction",function() return Cfg.Aim.Prediction end,function(v) Cfg.Aim.Prediction=v end)
 T(Tabs.Combat,"AimWall","Wall Check",function() return Cfg.Aim.WallCheck end,function(v) Cfg.Aim.WallCheck=v end)
 T(Tabs.Combat,"AimTeam","Team Check",function() return Cfg.Aim.TeamCheck end,function(v) Cfg.Aim.TeamCheck=v end)
@@ -1337,7 +1418,7 @@ S(Tabs.Combat,"PredStrength","Prediction Strength",1,20,3,function(v) Cfg.Aim.Pr
 S(Tabs.Combat,"Smooth","Smoothness",1,100,8,function(v) Cfg.Aim.Smoothness=v end)
 S(Tabs.Combat,"AimStrength","Aim Strength",1,100,70,function(v) Cfg.Aim.AimStrength=v end)
 T(Tabs.Combat,"FocusPriorityEnabled","Enable Focus Priority",function() return Cfg.Aim.FocusPriorityEnabled end,function(v) Cfg.Aim.FocusPriorityEnabled=v end)
-Tabs.Combat:AddDropdown("FocusPriority",{Title="Focus Priority",Values={"Closest","Farthest","Most Health","Least Health"},Multi=false,Default=1,Callback=function(v) Cfg.Aim.FocusPriority=v end})
+Tabs.Combat:AddDropdown("FocusPriority",{Title="Focus Priority",Values={"Closest","Farthest","Most Health","Least Health"},Multi=false,Default=Cfg.Aim.FocusPriority,Callback=function(v) Cfg.Aim.FocusPriority=v end})
 Tabs.Combat:AddSection("Aim Exclusion List")
 local aimExcludeNames={"Press Load Players"}; local aimExcludeSelected=nil; local aimExcludeMap={}
 local function RefreshAimExcludeList()
@@ -1397,6 +1478,9 @@ end})
 Tabs.Combat:AddSection("FOV")
 T(Tabs.Combat,"ShowFOV","Show FOV",function() return Cfg.Aim.ShowFOV end,function(v) Cfg.Aim.ShowFOV=v end)
 T(Tabs.Combat,"UseFOV","Use FOV",function() return Cfg.Aim.UseFOV end,function(v) Cfg.Aim.UseFOV=v end)
+T(Tabs.Combat,"CameraFollow","Camera Follow Target",function() return Cfg.Aim.CameraFollow end,function(v) Cfg.Aim.CameraFollow=v; if not v then _aimLockedTarget=nil end end)
+T(Tabs.Combat,"AimMaxDistanceEnabled","Max Distance",function() return Cfg.Aim.MaxDistanceEnabled end,function(v) Cfg.Aim.MaxDistanceEnabled=v end)
+S(Tabs.Combat,"AimMaxDistance","Aim Distance",50,10000,500,function(v) Cfg.Aim.MaxDistance=v end)
 S(Tabs.Combat,"FOVSize","FOV Size",10,800,150,function(v) Cfg.Aim.FOV=v end)
 Tabs.Combat:AddSection("TriggerBot")
 T(Tabs.Combat,"Trigger","Enable TriggerBot",function() return Cfg.Trigger.Enabled end,function(v) Cfg.Trigger.Enabled=v end)
@@ -1412,7 +1496,7 @@ S(Tabs.Combat,"HitboxSize","Hitbox Size",2,80,8,function(v) Cfg.Misc.HitboxSize=
 
 Tabs.Visuals:AddSection("ESP")
 T(Tabs.Visuals,"ESP","Enable ESP",function() return Cfg.ESP.Enabled end,function(v) Cfg.ESP.Enabled=v end)
-Tabs.Visuals:AddDropdown("ESPMode",{Title="ESP Mode",Values={"Default (Universal)","Deadline"},Multi=false,Default=1,Callback=function(v) Cfg.ESP.Mode=v end})
+Tabs.Visuals:AddDropdown("ESPMode",{Title="ESP Mode",Values={"Default (Universal)","Deadline"},Multi=false,Default=Cfg.ESP.Mode,Callback=function(v) Cfg.ESP.Mode=v end})
 T(Tabs.Visuals,"Box","Box",function() return Cfg.ESP.Box end,function(v) Cfg.ESP.Box=v end)
 T(Tabs.Visuals,"Fill","Fill",function() return Cfg.ESP.Fill end,function(v) Cfg.ESP.Fill=v end)
 T(Tabs.Visuals,"Names","Names",function() return Cfg.ESP.Names end,function(v) Cfg.ESP.Names=v end)
@@ -1424,11 +1508,6 @@ T(Tabs.Visuals,"Skeleton","Skeleton",function() return Cfg.ESP.Skeleton end,func
 S(Tabs.Visuals,"MaxDistance","Max Distance",50,10000,500,function(v) Cfg.ESP.MaxDist=v end)
 S(Tabs.Visuals,"ESPUpdateRate","ESP Update Rate (FPS)",1,60,30,function(v) Cfg.ESP.UpdateRate=v; _espInterval=1/math.max(v,1) end)
 T(Tabs.Visuals,"HeldTool","Show Item in Hand",function() return Cfg.ESP.HeldTool end,function(v) Cfg.ESP.HeldTool=v end)
-local ESPColors={Red=Color3.fromRGB(220,40,40),Blue=Color3.fromRGB(40,130,240),Purple=Color3.fromRGB(160,50,220),Yellow=Color3.fromRGB(230,190,40),White=Color3.fromRGB(255,255,255)}
-Tabs.Visuals:AddDropdown("ESPColor",{Title="ESP Color",Values={"Red","Blue","Purple","Yellow","White"},Multi=false,Default=1,Callback=function(v)
-    local c=ESPColors[v]
-    Cfg.ESP.BoxColor=c; Cfg.ESP.FillColor=c; Cfg.ESP.NameColor=c; Cfg.ESP.TracerColor=c; Cfg.ESP.DistColor=c; Cfg.ESP.SkelColor=c
-end})
 
 Tabs.Misc:AddSection("Movement")
 T(Tabs.Misc,"Fly","Fly",function() return Cfg.Misc.Fly end,function(v) Cfg.Misc.Fly=v; if v then EnableFly() else DisableFly() end end)
@@ -1461,7 +1540,7 @@ local function RefreshFluentTools(query)
     if Options.ToolList then Options.ToolList:SetValues(toolNames[1] and toolNames or {"No tools found"}) end
 end
 Tabs.Spawn:AddInput("ToolSearch",{Title="Search Tool",Placeholder="Type a tool name",Default="",Callback=function(v) end})
-Tabs.Spawn:AddDropdown("ToolList",{Title="Select Tool",Values={"Press Search Tool"},Multi=false,Default=1,Callback=function(v)
+Tabs.Spawn:AddDropdown("ToolList",{Title="Select Tool",Values={"Press Load Tools"},Multi=false,Default=1,Callback=function(v)
     for _,entry in ipairs(toolEntries) do if entry.name==v then selectedTool=entry; break end end
 end})
 Tabs.Spawn:AddButton({Title="Load Tools",Callback=function() RefreshFluentTools(Options.ToolSearch and Options.ToolSearch.Value or "") end})
@@ -1469,6 +1548,52 @@ Tabs.Spawn:AddButton({Title="Spawn Selected Tool",Callback=function()
     if selectedTool then _TryGrab(selectedTool.tool) end
 end})
 Tabs.Spawn:AddButton({Title="Grab Nearest Tool",Callback=function() GrabNearestTool() end})
+local inventoryToolNames={"Press Refresh Inventory"}
+local selectedInventoryTool=nil
+local function RefreshInventoryTools()
+    local names={}; local seen={}
+    local character=LP and LP.Character
+    local backpack=LP and LP:FindFirstChild("Backpack")
+    for _,container in ipairs({character,backpack}) do
+        if container then
+            for _,item in ipairs(container:GetChildren()) do
+                if item:IsA("Tool") and not seen[item.Name] then
+                    seen[item.Name]=true; names[#names+1]=item.Name
+                end
+            end
+        end
+    end
+    table.sort(names)
+    inventoryToolNames=#names>0 and names or {"No tools in inventory"}
+    if Options.InventoryTool then Options.InventoryTool:SetValues(inventoryToolNames) end
+    if #names>0 then selectedInventoryTool=names[1] else selectedInventoryTool=nil end
+end
+Tabs.Spawn:AddDropdown("InventoryTool",{Title="Tool to Remove",Values=inventoryToolNames,Multi=false,Default=1,Callback=function(v)
+    if v~="No tools in inventory" and v~="Press Refresh Inventory" then selectedInventoryTool=v end
+end})
+Tabs.Spawn:AddButton({Title="Refresh Inventory",Callback=RefreshInventoryTools})
+Tabs.Spawn:AddButton({Title="Remove Selected Tool",Callback=function()
+    local targetName=selectedInventoryTool
+    if not targetName or targetName=="No tools in inventory" or targetName=="Press Refresh Inventory" then
+        Fluent:Notify({Title="Tools",Content="Selecione uma ferramenta do inventário primeiro.",Duration=2})
+        return
+    end
+    local character=LP and LP.Character
+    local backpack=LP and LP:FindFirstChild("Backpack")
+    local removed=0
+    for _,container in ipairs({character,backpack}) do
+        if container then
+            for _,item in ipairs(container:GetChildren()) do
+                if item:IsA("Tool") and item.Name==targetName then
+                    pcall(function() item:Destroy() end)
+                    removed=removed+1
+                end
+            end
+        end
+    end
+    Fluent:Notify({Title="Tools",Content=removed>0 and ("Ferramenta removida: "..targetName) or "A ferramenta não foi encontrada.",Duration=2})
+    RefreshInventoryTools()
+end})
 -- Tools are scanned only after the user presses Load Tools.
 
 -- Atualização explícita dos controles Fluent após LoadCfg/importação.
@@ -1480,11 +1605,13 @@ SyncGuiFromCfg=function()
         end
     end
     local toggles={
+        AimMaxDistanceEnabled=Cfg.Aim.MaxDistanceEnabled,
+        RadarHighlight=Cfg.ESP.RadarHighlight,
         ESP=Cfg.ESP.Enabled, Box=Cfg.ESP.Box, Fill=Cfg.ESP.Fill,
         Names=Cfg.ESP.Names, Health=Cfg.ESP.HP, Tracers=Cfg.ESP.Tracers,
         Distance=Cfg.ESP.Dist, TeamCheck=Cfg.ESP.TeamCheck, Skeleton=Cfg.ESP.Skeleton,
         HeldTool=Cfg.ESP.HeldTool, Aimbot=Cfg.Aim.Aimbot, ShowFOV=Cfg.Aim.ShowFOV,
-        UseFOV=Cfg.Aim.UseFOV, Trigger=Cfg.Trigger.Enabled, TriggerTeam=Cfg.Trigger.TeamCheck,
+        UseFOV=Cfg.Aim.UseFOV, CameraFollow=Cfg.Aim.CameraFollow, Trigger=Cfg.Trigger.Enabled, TriggerTeam=Cfg.Trigger.TeamCheck,
         Hitbox=Cfg.Misc.HitboxExtender, HitboxTeamCheck=Cfg.Misc.TeamCheck,
         Fly=Cfg.Misc.Fly, Noclip=Cfg.Misc.Noclip, Speed=Cfg.Misc.Speed,
         Jump=Cfg.Misc.JumpMod, AntiRag=Cfg.Misc.AntiRag, ClickTP=Cfg.Misc.ClickTp,
@@ -1493,7 +1620,7 @@ SyncGuiFromCfg=function()
     }
     for id,value in pairs(toggles) do set(id,value) end
     local sliders={
-        FOVSize=Cfg.Aim.FOV, TriggerDelay=Cfg.Trigger.Delay,
+        FOVSize=Cfg.Aim.FOV, AimMaxDistance=Cfg.Aim.MaxDistance, TriggerDelay=Cfg.Trigger.Delay,
         HitboxSize=Cfg.Misc.HitboxSize, MaxDistance=Cfg.ESP.MaxDist,
         ESPUpdateRate=Cfg.ESP.UpdateRate, FlySpeed=Cfg.Misc.FlySpeed,
         WalkSpeed=Cfg.Misc.WalkSpeed, JumpPower=Cfg.Misc.JumpPower,
@@ -1501,7 +1628,10 @@ SyncGuiFromCfg=function()
     for id,value in pairs(sliders) do set(id,value) end
     set("AimMode",Cfg.Aim.AimbotType); set("AimPart",Cfg.Aim.AimPart)
     set("FocusPriority",Cfg.Aim.FocusPriority); set("HitboxPart",Cfg.Misc.HitboxPart)
-    set("ESPMode",Cfg.ESP.Mode)
+    set("ESPMode",Cfg.ESP.Mode); set("ESPColor",Cfg.ESP.ESPColorName or "Red"); set("FOVColor",Cfg.Aim.FOVColorName); set("RadarColor",Cfg.ESP.RadarColorName)
+    for title,entry in pairs(_bindButtons) do
+        if entry.Button and entry.Button.SetTitle then pcall(function() entry.Button:SetTitle(title..": ["..tostring(entry.GetName()).."]") end) end
+    end
 end
 local function SyncGuiAfterLoad()
     if not SyncGuiFromCfg then return end
@@ -1574,7 +1704,9 @@ Tabs.Radar:AddButton({Title="Load Players",Callback=RefreshRadarList})
 Tabs.Radar:AddButton({Title="Track Selected",Callback=function()
     if radarSelected and radarSelected~="No players found" and radarSelected~="Press Load Players" then Cfg.ESP.RadarTarget=radarSelected; Cfg.ESP.RadarEnabled=true; RefreshRadarList() end
 end})
-Tabs.Radar:AddButton({Title="Clear Radar Target",Callback=function() Cfg.ESP.RadarTarget=""; Cfg.ESP.RadarEnabled=false end})
+Tabs.Radar:AddButton({Title="Clear Radar Target",Callback=function() Cfg.ESP.RadarTarget=""; Cfg.ESP.RadarEnabled=false; RefreshRadarList() end})
+T(Tabs.Radar,"RadarHighlight","Highlight Target in ESP",function() return Cfg.ESP.RadarHighlight end,function(v) Cfg.ESP.RadarHighlight=v end)
+Tabs.Radar:AddParagraph({Title="Radar / ESP",Content="When Highlight is enabled, the selected target remains visible with a separate color instead of filtering the ESP to one player."})
 
 Tabs.Binds:AddSection("Menu and Systems")
 BindButton(Tabs.Binds,"Toggle Menu",function() return Cfg.Settings.ToggleKeyName end,function(k,n) Cfg.Settings.ToggleKey=k; Cfg.Settings.ToggleKeyName=n end)
@@ -1592,6 +1724,16 @@ end})
 
 Tabs.Settings:AddSection("Control")
 T(Tabs.Settings,"BlockGameInput","Block game interaction while menu is open",function() return Cfg.Settings.BlockGameInput end,function(v) Cfg.Settings.BlockGameInput=v; SetHubFocus(_hubMenuOpen) end)
+local CustomColors={Red=Color3.fromRGB(220,40,40),Blue=Color3.fromRGB(40,130,240),Purple=Color3.fromRGB(160,50,220),Yellow=Color3.fromRGB(230,190,40),White=Color3.fromRGB(255,255,255)}
+Tabs.Custom:AddSection("Personalização de cores")
+local ESPColors={Red=Color3.fromRGB(220,40,40),Blue=Color3.fromRGB(40,130,240),Purple=Color3.fromRGB(160,50,220),Yellow=Color3.fromRGB(230,190,40),White=Color3.fromRGB(255,255,255)}
+Tabs.Custom:AddDropdown("ESPColor",{Title="ESP Color",Values={"Red","Blue","Purple","Yellow","White"},Multi=false,Default=Cfg.ESP.ESPColorName or "Red",Callback=function(v)
+    local c=ESPColors[v]
+    if c then Cfg.ESP.ESPColorName=v; Cfg.ESP.BoxColor=c; Cfg.ESP.FillColor=c; Cfg.ESP.NameColor=c; Cfg.ESP.TracerColor=c; Cfg.ESP.DistColor=c; Cfg.ESP.SkelColor=c end
+end})
+Tabs.Custom:AddDropdown("FOVColor",{Title="Aim FOV Color",Values={"Red","Blue","Purple","Yellow","White"},Multi=false,Default=Cfg.Aim.FOVColorName,Callback=function(v) if CustomColors[v] then Cfg.Aim.FOVColorName=v end end})
+Tabs.Custom:AddDropdown("RadarColor",{Title="Radar Highlight Color",Values={"Red","Blue","Purple","Yellow","White"},Multi=false,Default=Cfg.ESP.RadarColorName,Callback=function(v) if CustomColors[v] then Cfg.ESP.RadarColorName=v end end})
+Tabs.Custom:AddParagraph({Title="Aplicação",Content="As cores do FOV e do destaque individual do Radar/ESP são salvas junto com a configuração."})
 Tabs.Settings:AddSection("Diagnostics")
 Tabs.Settings:AddParagraph({Title="Runtime diagnostics",Content="Shows module state, recent errors, frame update time and managed resources."})
 Tabs.Settings:AddButton({Title="Run Diagnostics",Callback=function()
