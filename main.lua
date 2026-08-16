@@ -1,5 +1,5 @@
 -- 
---             223JHUB  v1.5  free universal script          
+--             223JHUB  v2.5  free universal script          
 --                 SCRIPT POR BRUNO223J E TY                 
 --               DISCORD: bruno223j  |  frty2017             
 -- 
@@ -786,6 +786,7 @@ end))
 -- OTIMIZAO: reutiliza tabela pset em vez de criar por chamada
 -- ============================================================
 local _hbConns={}
+local _hbOriginals={}
 local HBP={
     All  ={"Head","Torso","UpperTorso","LowerTorso","HumanoidRootPart","Left Arm","Right Arm","Left Leg","Right Leg","LeftUpperArm","RightUpperArm","LeftLowerArm","RightLowerArm","LeftHand","RightHand","LeftUpperLeg","RightUpperLeg","LeftLowerLeg","RightLowerLeg","LeftFoot","RightFoot"},
     Head ={"Head"}, Torso={"Torso","UpperTorso","LowerTorso"},
@@ -801,29 +802,43 @@ for k, names in pairs(HBP) do
     HBP_SETS[k] = s
 end
 
-local function ApplyHBChar(char)
-    if not Cfg.Misc.HitboxExtender then return end
-    local pset = HBP_SETS[Cfg.Misc.HitboxPart] or HBP_SETS["All"]
-    local sz   = Cfg.Misc.HitboxSize
-    for _,v in ipairs(char:GetDescendants()) do
-        if v:IsA("BasePart") and pset[v.Name] then
-            v.Size=Vector3.new(sz,sz,sz)
-            v.LocalTransparencyModifier=0.8
+local function RestoreHitbox(p)
+    local originals=_hbOriginals[p]
+    if not originals then return end
+    for part,state in pairs(originals) do
+        if part and part.Parent and state then
+            pcall(function() part.Size=state.Size end)
+            pcall(function() part.LocalTransparencyModifier=state.LocalTransparencyModifier end)
+        end
+    end
+    _hbOriginals[p]=nil
+end
+local function ApplyHBChar(p,char)
+    if not p or not char or not Cfg.Misc.HitboxExtender then return end
+    local pset=HBP_SETS[Cfg.Misc.HitboxPart] or HBP_SETS.All
+    local size=math.clamp(tonumber(Cfg.Misc.HitboxSize) or 8,2,80)
+    local originals=_hbOriginals[p] or {}; _hbOriginals[p]=originals
+    for _,part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") and pset[part.Name] then
+            if not originals[part] then
+                originals[part]={Size=part.Size,LocalTransparencyModifier=part.LocalTransparencyModifier}
+            end
+            part.Size=Vector3.new(size,size,size)
+            part.LocalTransparencyModifier=0.8
         end
     end
 end
 local function SetHitbox(p,on)
     if p==LP then return end
     if _hbConns[p] then _hbConns[p]:Disconnect(); _hbConns[p]=nil end
-    if on then
-        if p.Character then ApplyHBChar(p.Character) end
-        _hbConns[p]=p.CharacterAdded:Connect(function(c) task.wait(0.5); ApplyHBChar(c) end)
-    else
-        local char=p.Character; if not char then return end
-        for _,v in ipairs(char:GetDescendants()) do
-            if v:IsA("BasePart") then v.Size=Vector3.new(2,2,1); v.LocalTransparencyModifier=0 end
-        end
-    end
+    if not on then RestoreHitbox(p); return end
+    RestoreHitbox(p)
+    if p.Character then ApplyHBChar(p,p.Character) end
+    _hbConns[p]=p.CharacterAdded:Connect(function(char)
+        RestoreHitbox(p)
+        task.wait(0.5)
+        if Cfg.Misc.HitboxExtender then ApplyHBChar(p,char) end
+    end)
 end
 local function RefreshHitboxes()
     for _,p in ipairs(Players:GetPlayers()) do
@@ -1069,7 +1084,7 @@ AC(Players.PlayerAdded:Connect(function(p)
     if Cfg.Misc.HitboxExtender then SetHitbox(p,true) end
 end))
 AC(Players.PlayerRemoving:Connect(function(p)
-    KillESP(p); _hbConns[p]=nil
+    KillESP(p); SetHitbox(p,false); _hbConns[p]=nil; _hbOriginals[p]=nil
 end))
 AC(LP.CharacterAdded:Connect(function()
     task.wait(0.5)
@@ -1197,8 +1212,8 @@ end))
 -- GUI Fluent
 local Fluent=loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 local Window=Fluent:CreateWindow({
-    Title="223JHUB",
-    SubTitle="2.5 | revolucionari'us",
+    Title="223JHUB 2.0",
+    SubTitle="223JHUB 2.0 | Fluent Edition",
     TabWidth=160,
     Size=UDim2.fromOffset(760,560),
     Acrylic=false,
@@ -1383,7 +1398,10 @@ T(Tabs.Combat,"TriggerTeam","Team Check",function() return Cfg.Trigger.TeamCheck
 S(Tabs.Combat,"TriggerDelay","Delay (ms)",0,1000,80,function(v) Cfg.Trigger.Delay=v end)
 Tabs.Combat:AddSection("Hitbox Extender")
 T(Tabs.Combat,"Hitbox","Enable Hitbox",function() return Cfg.Misc.HitboxExtender end,function(v) Cfg.Misc.HitboxExtender=v; RefreshHitboxes() end)
-S(Tabs.Combat,"HitboxSize","Hitbox Size",1,80,8,function(v) Cfg.Misc.HitboxSize=v; if Cfg.Misc.HitboxExtender then RefreshHitboxes() end end)
+Tabs.Combat:AddDropdown("HitboxPart",{Title="Hitbox Part",Values={"All","Head","Torso","Arms","Legs","HRP"},Multi=false,Default=Cfg.Misc.HitboxPart,Callback=function(v)
+    if HBP_SETS[v] then Cfg.Misc.HitboxPart=v; if Cfg.Misc.HitboxExtender then RefreshHitboxes() end end
+end})
+S(Tabs.Combat,"HitboxSize","Hitbox Size",2,80,8,function(v) Cfg.Misc.HitboxSize=math.clamp(tonumber(v) or 8,2,80); if Cfg.Misc.HitboxExtender then RefreshHitboxes() end end)
 
 Tabs.Visuals:AddSection("ESP")
 T(Tabs.Visuals,"ESP","Enable ESP",function() return Cfg.ESP.Enabled end,function(v) Cfg.ESP.Enabled=v end)
@@ -1540,6 +1558,7 @@ local function ShutdownHub()
     Cfg.Misc.Fly=false; Cfg.Misc.Noclip=false; Cfg.Misc.Speed=false; Cfg.Misc.JumpMod=false; Cfg.Misc.HitboxExtender=false
     pcall(DisableFly); pcall(DisableNoclip); pcall(ApplySpeed); pcall(ApplyJump)
     pcall(function() for player in pairs(_hbConns) do SetHitbox(player,false) end end)
+    pcall(function() for player in pairs(_hbOriginals) do RestoreHitbox(player) end end)
     -- Remove both ESP pools, including Deadline models not represented by Players.
     pcall(function() for player in pairs(ESPO) do KillESP(player) end end)
     pcall(function() for model in pairs(DeadlineDrawings) do DestroyDeadlineESP(model) end end)
@@ -1567,14 +1586,14 @@ _G._223HUB_Shutdown=ShutdownHub
 Tabs.Settings:AddButton({Title="Unload 223JHUB",Callback=ShutdownHub})
 Tabs.Settings:AddParagraph({Title="Shutdown",Content="Stops all systems, disconnects events and removes the interface."})
 Tabs.Settings:AddSection("About")
-Tabs.Settings:AddParagraph({Title="Credits",Content="223JHUB 2.5 | Script by Bruno223J and TY | Revolutionarius Group"})
+Tabs.Settings:AddParagraph({Title="Credits",Content="223JHUB 2.0 | Script by Bruno223J and TY | Revolutionarius Group"})
 Tabs.Settings:AddParagraph({Title="Fluent UI",Content="Interface powered by Fluent UI Library."})
-Tabs.Credits:AddSection("223JHUB 2.5")
+Tabs.Credits:AddSection("223JHUB 2.0")
 Tabs.Credits:AddParagraph({Title="Developers",Content="Bruno223j and TY"})
 Tabs.Credits:AddParagraph({Title="Discord",Content="bruno223j & frty2017"})
 Tabs.Credits:AddParagraph({Title="Final Edition",Content="ESP, controls and cleanup finalized."})
 Window:SelectTab(1)
-Fluent:Notify({Title="223JHUB 2.5",Content="Fluent interface loaded.",Duration=4})
+Fluent:Notify({Title="223JHUB 2.0",Content="Fluent interface loaded.",Duration=4})
 -- O Fluent pode alterar o foco durante a montagem; aplica o estado final depois disso.
 task.defer(function()
     SetHubFocus(_hubMenuOpen)
@@ -1582,7 +1601,7 @@ task.defer(function()
     pcall(function() UIS.MouseIconEnabled=true end)
 end)
 
-print("[223JHUB 2.5 RELEASE]  LOADED | BRUNO223J & TY | DISCORD | bruno223j | frty2017 | Toggle=[;]")
+print("[223JHUB 2.0 RELEASE]  LOADED | BRUNO223J & TY | DISCORD | bruno223j | frty2017 | Toggle=[;]")
 
 end -- fim de _223JHUB_MAIN()
 
