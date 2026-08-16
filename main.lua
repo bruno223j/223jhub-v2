@@ -246,6 +246,7 @@ local function ValidateConfig(t)
     if t.ESP and t.ESP.UpdateRate~=nil and (type(t.ESP.UpdateRate)~="number" or t.ESP.UpdateRate<1 or t.ESP.UpdateRate>60) then return false,"ESP.UpdateRate must be between 1 and 60" end
     return true
 end
+local SyncGuiFromCfg
 local function ApplySave(t)
     local valid,err=ValidateConfig(t)
     if not valid then DiagError("Saves",err); return false,err end
@@ -288,6 +289,7 @@ local function ApplySave(t)
     Cfg.Settings.ClickTpKey=TK(Cfg.Settings.ClickTpKeyName,KeepBind(Cfg.Settings.ClickTpKey,Enum.KeyCode.F8))
     Cfg.ESP.UpdateRate=math.clamp(tonumber(Cfg.ESP.UpdateRate) or 30,1,60)
     _espInterval=1/Cfg.ESP.UpdateRate
+    if SyncGuiFromCfg then pcall(SyncGuiFromCfg) end
     DiagModule("Saves","ok",nil,0)
     return true
 end
@@ -1469,6 +1471,49 @@ end})
 Tabs.Spawn:AddButton({Title="Grab Nearest Tool",Callback=function() GrabNearestTool() end})
 -- Tools are scanned only after the user presses Load Tools.
 
+-- Atualização explícita dos controles Fluent após LoadCfg/importação.
+SyncGuiFromCfg=function()
+    local function set(id,value)
+        local option=Options and Options[id]
+        if option and option.SetValue then
+            pcall(function() option:SetValue(value) end)
+        end
+    end
+    local toggles={
+        ESP=Cfg.ESP.Enabled, Box=Cfg.ESP.Box, Fill=Cfg.ESP.Fill,
+        Names=Cfg.ESP.Names, Health=Cfg.ESP.HP, Tracers=Cfg.ESP.Tracers,
+        Distance=Cfg.ESP.Dist, TeamCheck=Cfg.ESP.TeamCheck, Skeleton=Cfg.ESP.Skeleton,
+        HeldTool=Cfg.ESP.HeldTool, Aimbot=Cfg.Aim.Aimbot, ShowFOV=Cfg.Aim.ShowFOV,
+        UseFOV=Cfg.Aim.UseFOV, Trigger=Cfg.Trigger.Enabled, TriggerTeam=Cfg.Trigger.TeamCheck,
+        Hitbox=Cfg.Misc.HitboxExtender, HitboxTeamCheck=Cfg.Misc.TeamCheck,
+        Fly=Cfg.Misc.Fly, Noclip=Cfg.Misc.Noclip, Speed=Cfg.Misc.Speed,
+        Jump=Cfg.Misc.JumpMod, AntiRag=Cfg.Misc.AntiRag, ClickTP=Cfg.Misc.ClickTp,
+        AntiAFK=Cfg.Misc.AntiAFK, BlockGameInput=Cfg.Settings.BlockGameInput,
+        VSync=Cfg.Settings.VSync,
+    }
+    for id,value in pairs(toggles) do set(id,value) end
+    local sliders={
+        FOVSize=Cfg.Aim.FOV, TriggerDelay=Cfg.Trigger.Delay,
+        HitboxSize=Cfg.Misc.HitboxSize, MaxDistance=Cfg.ESP.MaxDist,
+        ESPUpdateRate=Cfg.ESP.UpdateRate, FlySpeed=Cfg.Misc.FlySpeed,
+        WalkSpeed=Cfg.Misc.WalkSpeed, JumpPower=Cfg.Misc.JumpPower,
+    }
+    for id,value in pairs(sliders) do set(id,value) end
+    set("AimMode",Cfg.Aim.AimbotType); set("AimPart",Cfg.Aim.AimPart)
+    set("FocusPriority",Cfg.Aim.FocusPriority); set("HitboxPart",Cfg.Misc.HitboxPart)
+    set("ESPMode",Cfg.ESP.Mode)
+end
+local function SyncGuiAfterLoad()
+    if not SyncGuiFromCfg then return end
+    -- Alguns elementos Fluent ainda estão em animação durante o primeiro SetValue.
+    task.defer(function()
+        for _=1,3 do
+            pcall(SyncGuiFromCfg)
+            task.wait(0.15)
+        end
+    end)
+end
+
 -- Aba Saves: opera??es locais compat?veis com writefile/readfile/listfiles.
 local saveNames={}; local selectedSave=nil
 local function RefreshSaveList()
@@ -1487,7 +1532,9 @@ Tabs.Saves:AddButton({Title="Save Current",Callback=function()
 end})
 Tabs.Saves:AddButton({Title="Load Selected",Callback=function()
     if not selectedSave or selectedSave=="No saves found" then return end
-    local ok,msg=LoadCfg(selectedSave); Fluent:Notify({Title="Saves",Content=ok and "Configuracao carregada." or tostring(msg),Duration=2})
+    local ok,msg=LoadCfg(selectedSave)
+    if ok then SyncGuiAfterLoad() end
+    Fluent:Notify({Title="Saves",Content=ok and "Configuracao carregada." or tostring(msg),Duration=2})
 end})
 Tabs.Saves:AddButton({Title="Delete Selected",Callback=function()
     if not selectedSave or selectedSave=="No saves found" then return end
@@ -1500,7 +1547,7 @@ Tabs.Saves:AddButton({Title="Import JSON",Callback=function()
     local ok,data=pcall(function() return HttpService:JSONDecode(raw) end)
     if not ok then DiagError("Saves","JSON invalido"); Fluent:Notify({Title="Saves",Content="JSON invalido.",Duration=2}); return end
     local applied,err=ApplySave(data)
-    if applied then Fluent:Notify({Title="Saves",Content="JSON importado.",Duration=2}) else Fluent:Notify({Title="Saves",Content=tostring(err),Duration=3}) end
+    if applied then SyncGuiAfterLoad(); Fluent:Notify({Title="Saves",Content="JSON importado.",Duration=2}) else Fluent:Notify({Title="Saves",Content=tostring(err),Duration=3}) end
 end})
 Tabs.Saves:AddButton({Title="Export JSON",Callback=function()
     local raw=SerCfg()
