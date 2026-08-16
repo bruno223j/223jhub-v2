@@ -1197,8 +1197,8 @@ end))
 -- GUI Fluent
 local Fluent=loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 local Window=Fluent:CreateWindow({
-    Title="223JHUB 2.0",
-    SubTitle="223JHUB 2.0 | Fluent Edition",
+    Title="223JHUB",
+    SubTitle="2.5 | revolucionari'us",
     TabWidth=160,
     Size=UDim2.fromOffset(760,560),
     Acrylic=false,
@@ -1567,14 +1567,14 @@ _G._223HUB_Shutdown=ShutdownHub
 Tabs.Settings:AddButton({Title="Unload 223JHUB",Callback=ShutdownHub})
 Tabs.Settings:AddParagraph({Title="Shutdown",Content="Stops all systems, disconnects events and removes the interface."})
 Tabs.Settings:AddSection("About")
-Tabs.Settings:AddParagraph({Title="Credits",Content="223JHUB 2.0 | Script by Bruno223J and TY | Revolutionarius Group"})
+Tabs.Settings:AddParagraph({Title="Credits",Content="223JHUB 2.5 | Script by Bruno223J and TY | Revolutionarius Group"})
 Tabs.Settings:AddParagraph({Title="Fluent UI",Content="Interface powered by Fluent UI Library."})
-Tabs.Credits:AddSection("223JHUB 2.0")
+Tabs.Credits:AddSection("223JHUB 2.5")
 Tabs.Credits:AddParagraph({Title="Developers",Content="Bruno223j and TY"})
 Tabs.Credits:AddParagraph({Title="Discord",Content="bruno223j & frty2017"})
 Tabs.Credits:AddParagraph({Title="Final Edition",Content="ESP, controls and cleanup finalized."})
 Window:SelectTab(1)
-Fluent:Notify({Title="223JHUB 2.0",Content="Fluent interface loaded.",Duration=4})
+Fluent:Notify({Title="223JHUB 2.5",Content="Fluent interface loaded.",Duration=4})
 -- O Fluent pode alterar o foco durante a montagem; aplica o estado final depois disso.
 task.defer(function()
     SetHubFocus(_hubMenuOpen)
@@ -1582,7 +1582,7 @@ task.defer(function()
     pcall(function() UIS.MouseIconEnabled=true end)
 end)
 
-print("[223JHUB 2.0 RELEASE]  LOADED | BRUNO223J & TY | DISCORD | bruno223j | frty2017 | Toggle=[;]")
+print("[223JHUB 2.5 RELEASE]  LOADED | BRUNO223J & TY | DISCORD | bruno223j | frty2017 | Toggle=[;]")
 
 end -- fim de _223JHUB_MAIN()
 
