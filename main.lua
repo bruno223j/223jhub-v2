@@ -1,5 +1,5 @@
 -- 
---             223JHUB  v2.5  free universal script          
+--             223JHUB  v3.0  free universal script          
 --                 SCRIPT POR BRUNO223J E TY                 
 --               DISCORD: bruno223j  |  frty2017             
 -- 
@@ -167,7 +167,7 @@ local Cfg = {
         Enabled=false, Box=false, Fill=false, Names=false,
         HP=false, Tracers=false, Dist=false, WallCheck=false,
         TeamCheck=false, HeldTool=false,
-        MaxDist=500, TrackList={},
+        MaxDist=500, TrackList={}, AdaptivePerformance=false,
         BoxColor=Color3.fromRGB(220,40,40), FillColor=Color3.fromRGB(220,40,40),
         NameColor=Color3.fromRGB(255,255,255), TracerColor=Color3.fromRGB(220,40,40),
         DistColor=Color3.fromRGB(200,200,200), HPColor=Color3.fromRGB(0,255,0),
@@ -185,13 +185,13 @@ local Cfg = {
         AimKey=Enum.KeyCode.E, AimKeyName="E",
         AimStrength=70, Blacklist={}, FocusPriorityEnabled=false, FocusPriority="Closest",
     },
-    Trigger = { Enabled=false, TeamCheck=false, Delay=80, AutoBot=false,
+Trigger = { Enabled=false, TeamCheck=false, Delay=80, AutoBot=false, Mode="Semi",
                 ClickControl=false, ClickCount=3,
                 OneShot=false, OneShotDelay=3 },
     Misc = {
         Fly=false, FlySpeed=50, FlyBoost=false, Noclip=false,
         Speed=false, WalkSpeed=25, AntiAFK=false,
-        HitboxExtender=false, TeamCheck=false, HitboxSize=8, HitboxPart="All",
+        HitboxExtender=false, TeamCheck=false, HitboxSize=8,
         JumpMod=false, JumpPower=80, JumpMethod="JumpPower",
         InfJump=false, AntiRag=false, ClickTp=false, SpinBot=false,
         CrashLag=false, AutoJump=false,
@@ -206,7 +206,9 @@ local Cfg = {
 SpeedKey=Enum.KeyCode.F7,    SpeedKeyName="F7",
         ClickTpKey=Enum.KeyCode.F8, ClickTpKeyName="F8",
         ToggleKeyName="Semicolon",
-        BlockGameInput=false, VSync=false,
+        BlockGameInput=false, VSync=true,
+        ThemePreset="Dark", AccentColorName="Blue", TextColorName="White",
+        BackgroundTransparency=0.12, UIScale=1, WindowWidth=760, WindowHeight=560,
     },
 }
 
@@ -580,7 +582,7 @@ local _fovLastCX  = -1
 local _fovLastCY  = -1
 local _fovLastVis = nil
 local _fovLastColor = nil
-local FOVColors={Red=Color3.fromRGB(220,40,40),Blue=Color3.fromRGB(40,130,240),Purple=Color3.fromRGB(160,50,220),Yellow=Color3.fromRGB(230,190,40),White=Color3.fromRGB(255,255,255)}
+local FOVColors={Red=Color3.fromRGB(220,40,40),Blue=Color3.fromRGB(40,130,240),Purple=Color3.fromRGB(160,50,220),Yellow=Color3.fromRGB(230,190,40),White=Color3.fromRGB(255,255,255),Green=Color3.fromRGB(50,210,100),Cyan=Color3.fromRGB(30,220,220),Orange=Color3.fromRGB(255,140,40),Pink=Color3.fromRGB(240,80,170),Aqua=Color3.fromRGB(60,180,255)}
 
 -- OTIMIZAO: pre-calcula ngulos do FOV uma nica vez
 local _fovCos = {}
@@ -626,7 +628,14 @@ end
 -- ClickControl / One-Shot: modos de disparo do TriggerBot
 -- ============================================================
 local _tbLast      = 0
-local _tbFiring    = false  -- evita disparos sobrepostos
+local _tbFiring    = false
+local _tbHeld      = false
+local function _StopBurst()
+    if not _tbHeld then return end
+    pcall(function() game:GetService("VirtualInputManager"):SendMouseButtonEvent(0,0,0,false,game,0) end)
+    _tbHeld=false
+end
+-- evita disparos sobrepostos
 local _osShotReady = true   -- One-Shot: libera o prximo disparo
 local _osLastTgt   = nil    -- One-Shot: player do ltimo disparo
 
@@ -646,36 +655,30 @@ local function _DoClicks(n)
 end
 
 AC(RunService.Heartbeat:Connect(function()
-    if not Cfg.Trigger.Enabled then return end
-    if tick()-_tbLast < Cfg.Trigger.Delay/1000 then return end
-    local tgt=Mouse.Target; if not tgt then return end
-    local model=tgt:FindFirstAncestorOfClass("Model"); if not model then return end
-    local p=Players:GetPlayerFromCharacter(model); if not p then return end
-    if not IsValidTarget(p) then return end
-    if Cfg.Trigger.TeamCheck and SameTeam(p) then return end
-
-    -- One-Shot: 1 disparo por lock, depois aguarda delay configurvel
-    if Cfg.Trigger.OneShot then
-        -- Troca de alvo  reseta imediatamente para atirar
-        if p ~= _osLastTgt then
-            _osShotReady = true
-            _osLastTgt   = p
+    if not Cfg.Trigger.Enabled then _StopBurst(); return end
+    local tgt=Mouse.Target
+    local model=tgt and tgt:FindFirstAncestorOfClass("Model")
+    local p=model and Players:GetPlayerFromCharacter(model)
+    if not p or not IsValidTarget(p) or (Cfg.Trigger.TeamCheck and SameTeam(p)) then _StopBurst(); return end
+    local mode=Cfg.Trigger.Mode or (Cfg.Trigger.OneShot and "One-Shot" or "Semi")
+    if mode=="Burst" then
+        if not _tbHeld then
+            _tbHeld=true
+            pcall(function() game:GetService("VirtualInputManager"):SendMouseButtonEvent(0,0,0,true,game,0) end)
         end
-        if not _osShotReady then return end
-        _osShotReady = false
-        _tbLast = tick()
-        local clicks = (Cfg.Trigger.ClickControl and Cfg.Trigger.ClickCount) or 1
-        _DoClicks(clicks)
-        -- Aps o delay, libera prximo tiro no mesmo alvo
-        task.delay(Cfg.Trigger.OneShotDelay, function()
-            if _osLastTgt == p then _osShotReady = true end
-        end)
         return
     end
-
+    if tick()-_tbLast < Cfg.Trigger.Delay/1000 then return end
+    if mode=="One-Shot" or Cfg.Trigger.OneShot then
+        if p ~= _osLastTgt then _osShotReady=true; _osLastTgt=p end
+        if not _osShotReady then return end
+        _osShotReady=false; _tbLast=tick()
+        _DoClicks((Cfg.Trigger.ClickControl and Cfg.Trigger.ClickCount) or 1)
+        task.delay(Cfg.Trigger.OneShotDelay,function() if _osLastTgt==p then _osShotReady=true end end)
+        return
+    end
     _tbLast=tick()
-    local clicks = (Cfg.Trigger.ClickControl and Cfg.Trigger.ClickCount) or 1
-    _DoClicks(clicks)
+    _DoClicks((Cfg.Trigger.ClickControl and Cfg.Trigger.ClickCount) or 1)
 end))
 
 -- ============================================================
@@ -800,20 +803,9 @@ end))
 -- ============================================================
 local _hbConns={}
 local _hbOriginals={}
-local HBP={
-    All  ={"Head","Torso","UpperTorso","LowerTorso","HumanoidRootPart","Left Arm","Right Arm","Left Leg","Right Leg","LeftUpperArm","RightUpperArm","LeftLowerArm","RightLowerArm","LeftHand","RightHand","LeftUpperLeg","RightUpperLeg","LeftLowerLeg","RightLowerLeg","LeftFoot","RightFoot"},
-    Head ={"Head"}, Torso={"Torso","UpperTorso","LowerTorso"},
-    Arms ={"Left Arm","Right Arm","LeftUpperArm","RightUpperArm","LeftLowerArm","RightLowerArm","LeftHand","RightHand"},
-    Legs ={"Left Leg","Right Leg","LeftUpperLeg","RightUpperLeg","LeftLowerLeg","RightLowerLeg","LeftFoot","RightFoot"},
-    HRP  ={"HumanoidRootPart"},
-}
--- Pr-converte HBP para sets, evita rebuild por chamada
-local HBP_SETS = {}
-for k, names in pairs(HBP) do
-    local s = {}
-    for _,n in ipairs(names) do s[n]=true end
-    HBP_SETS[k] = s
-end
+local HBP_ALL_NAMES={"Head","Torso","UpperTorso","LowerTorso","HumanoidRootPart","Left Arm","Right Arm","Left Leg","Right Leg","LeftUpperArm","RightUpperArm","LeftLowerArm","RightLowerArm","LeftHand","RightHand","LeftUpperLeg","RightUpperLeg","LeftLowerLeg","RightLowerLeg","LeftFoot","RightFoot"}
+local HBP_ALL_SET={}
+for _,name in ipairs(HBP_ALL_NAMES) do HBP_ALL_SET[name]=true end
 
 local function RestoreHitbox(p)
     local originals=_hbOriginals[p]
@@ -829,7 +821,7 @@ end
 local function ApplyHBChar(p,char)
     if not p or not char or not Cfg.Misc.HitboxExtender then return end
     if Cfg.Misc.TeamCheck and SameTeam(p) then return end
-    local pset=HBP_SETS[Cfg.Misc.HitboxPart] or HBP_SETS.All
+    local pset=HBP_ALL_SET
     local size=math.clamp(tonumber(Cfg.Misc.HitboxSize) or 8,2,80)
     local originals=_hbOriginals[p] or {}; _hbOriginals[p]=originals
     for _,part in ipairs(char:GetDescendants()) do
@@ -850,8 +842,22 @@ local function SetHitbox(p,on)
     if p.Character then ApplyHBChar(p,p.Character) end
     _hbConns[p]=p.CharacterAdded:Connect(function(char)
         RestoreHitbox(p)
-        task.wait(0.5)
-        if Cfg.Misc.HitboxExtender then ApplyHBChar(p,char) end
+        if not Cfg.Misc.HitboxExtender then return end
+        task.spawn(function()
+            for _,delayTime in ipairs({0.2,0.6,1.2}) do
+                task.wait(delayTime)
+                if Cfg.Misc.HitboxExtender and p.Character==char then
+                    pcall(function() ApplyHBChar(p,char) end)
+                end
+            end
+        end)
+        pcall(function()
+            char.DescendantAdded:Connect(function(obj)
+                if Cfg.Misc.HitboxExtender and obj:IsA("BasePart") then
+                    task.defer(function() if p.Character==char then ApplyHBChar(p,char) end end)
+                end
+            end)
+        end)
     end)
 end
 local function RefreshHitboxes()
@@ -1027,6 +1033,11 @@ AC(RunService.RenderStepped:Connect(function(dt)
     end
     local now=os.clock()
     local syncInterval=Cfg.Settings.VSync and math.max(tonumber(dt) or 1/60,1/240) or _espInterval
+    if Cfg.ESP.AdaptivePerformance then
+        local playerCount=#Players:GetPlayers()
+        if playerCount<=1 then syncInterval=math.max(syncInterval,0.35) end
+        if not _hubMenuOpen then syncInterval=math.max(syncInterval,1/20) end
+    end
     if now-_espLastUpdate<syncInterval then
         DiagModule("ESP","waiting",nil,os.clock()-espStart)
         return
@@ -1090,6 +1101,7 @@ AC(RunService.RenderStepped:Connect(function(dt)
                 local tn=GetHeldTool(char)
                 if tn then SafeSet(d.Tool,{Position=Vector2.new(x+w/2,y-32),Text="["..tn.."]",Color=Cfg.ESP.ToolColor,Visible=true}) else SafeHide(d.Tool) end
             else SafeHide(d.Tool) end
+            local isAimTarget=(Cfg.ESP.RadarHighlight and Cfg.ESP.RadarTarget~="" and player.Name==Cfg.ESP.RadarTarget)
             if Cfg.ESP.Skeleton then
                 local bones=(char:FindFirstChild("Torso") and BONES_R6) or BONES_R15
                 for bi=1,MAX_BONES do
@@ -1251,13 +1263,28 @@ _fluentSource=_fluentSource:gsub("function l.Open(B)l.Opened=true A.ScrollingEna
 _fluentSource=_fluentSource:gsub("function l.Close(B)l.Opened=false A.ScrollingEnabled=true pcall(function()m.Frame.Size=UDim2.new(1,0,0,42)end)u.Size=UDim2.fromScale(1,0.6)v.Visible=false","function l.Close(B)l.Opened=false A.ScrollingEnabled=true u.Size=UDim2.fromScale(1,0.6)v.Visible=false")
 _fluentSource=_fluentSource:gsub("local y,z=function()if#l.Values>10 then v.Size=UDim2.fromOffset(x,392)else v.Size=UDim2.fromOffset(x,s.AbsoluteContentSize.Y+10)end end","local y,z=function()local maxH=math.max(120,math.min(392,ai.ViewportSize.Y-32))if#l.Values>10 then v.Size=UDim2.fromOffset(x,maxH)else v.Size=UDim2.fromOffset(x,math.min(s.AbsoluteContentSize.Y+10,maxH))end end")
 local Fluent=loadstring(_fluentSource)()
+local _fluentNotify=Fluent.Notify
+Fluent.Notify=function(self,data,...)
+    if type(data)=="table" and data.Title=="Interface" and data.Content=="Press RightShift to toggle the interface." then return end
+    return _fluentNotify(self,data,...)
+end
+local function RemoveInterfaceHint()
+    local cg=game:GetService("CoreGui")
+    for _,obj in ipairs(cg:GetDescendants()) do
+        if obj:IsA("TextLabel") and obj.Text=="Press RightShift to toggle the interface." then
+            local root=obj
+            for _=1,4 do if root.Parent then root=root.Parent end end
+            pcall(function() root:Destroy() end)
+        end
+    end
+end
 local Window=Fluent:CreateWindow({
-    Title="223JHUB",
-    SubTitle="223JHUB 2.5 | revolucionari'us",
+    Title="223JHUB 3.0",
+    SubTitle="223JHUB 3.0 | revolucionari'us",
     TabWidth=160,
-    Size=UDim2.fromOffset(760,560),
+    Size=UDim2.fromOffset(Cfg.Settings.WindowWidth or 760,Cfg.Settings.WindowHeight or 560),
     Acrylic=false,
-    Theme="Dark",
+    Theme=(Cfg.Settings.ThemePreset=="Light" and "Light" or (Cfg.Settings.ThemePreset=="Purple" and "Amethyst" or (Cfg.Settings.ThemePreset or "Dark"))),
     MinimizeKey=Enum.KeyCode.RightShift
 })
 -- Mantém dropdowns abertos dentro da área visível e evita que escapem pelas bordas.
@@ -1307,12 +1334,12 @@ local Tabs={
     Credits=Window:AddTab({Title="Credits",Icon="heart"})
 }
 local Options=Fluent.Options
-Tabs.Home:AddSection("223JHUB 2.5")
-Tabs.Home:AddParagraph({Title="Bem-vindo ao 223JHUB 2.5",Content="Interface Fluent para utilidades visuais, combate e gerenciamento de configuracoes."})
+Tabs.Home:AddSection("223JHUB 3.0")
+Tabs.Home:AddParagraph({Title="Bem-vindo ao 223JHUB 3.0",Content="Nova geração com temas ampliados, paletas de cores, TriggerBot Semi/Burst/One-Shot, desempenho adaptativo e melhorias de estabilidade."})
 Tabs.Home:AddParagraph({Title="Creditos",Content="Criado por Bruno223j e TY | Revolutionari'us Group"})
-Tabs.Home:AddParagraph({Title="Atualizacao",Content="Versao 2.5 com Saves, prioridade de foco, radar de alvo unico, taxa configur?vel do ESP e otimiza??o de ciclos."})
+Tabs.Home:AddParagraph({Title="Atualizacao",Content="Versao 3.0 com temas ampliados, novas paletas de cores, TriggerBot Semi/Burst/One-Shot, desempenho adaptativo e melhorias de estabilidade."})
 Tabs.Home:AddParagraph({Title="Estado",Content="As listas de jogadores e ferramentas s?o carregadas somente quando voc? solicita."})
-Tabs.Home:AddParagraph({Title="Novidades",Content="Camera Follow mantém o alvo acompanhado fora do FOV; Aimbot Distance limita a distância máxima; Radar Highlight destaca um alvo específico no ESP; a aba Personalização controla cores do ESP e do FOV."})
+Tabs.Home:AddParagraph({Title="Novidades",Content="Camera Follow mantém o alvo acompanhado fora do FOV; Aimbot Distance limita a distância máxima; Radar Highlight destaca um alvo específico no ESP; a aba Personalização reúne temas e cores ampliadas."})
 Tabs.Home:AddParagraph({Title="Interface",Content="Dropdowns são tratados como menus expansíveis e as binds carregadas pelos saves são reaplicadas visualmente na GUI."})
 _G._223HUB_ToggleMenu=function()
     _hubMenuOpen=not _hubMenuOpen
@@ -1483,15 +1510,14 @@ T(Tabs.Combat,"AimMaxDistanceEnabled","Max Distance",function() return Cfg.Aim.M
 S(Tabs.Combat,"AimMaxDistance","Aim Distance",50,10000,500,function(v) Cfg.Aim.MaxDistance=v end)
 S(Tabs.Combat,"FOVSize","FOV Size",10,800,150,function(v) Cfg.Aim.FOV=v end)
 Tabs.Combat:AddSection("TriggerBot")
-T(Tabs.Combat,"Trigger","Enable TriggerBot",function() return Cfg.Trigger.Enabled end,function(v) Cfg.Trigger.Enabled=v end)
+T(Tabs.Combat,"Trigger","Enable TriggerBot",function() return Cfg.Trigger.Enabled end,function(v) Cfg.Trigger.Enabled=v; if not v then _StopBurst() end end)
+Tabs.Combat:AddDropdown("TriggerMode",{Title="Trigger Mode",Values={"Semi","Burst","One-Shot"},Multi=false,Default=Cfg.Trigger.Mode or "Semi",Callback=function(v) Cfg.Trigger.Mode=v; Cfg.Trigger.OneShot=(v=="One-Shot"); if v~="Burst" then _StopBurst() end end})
 T(Tabs.Combat,"TriggerTeam","Team Check",function() return Cfg.Trigger.TeamCheck end,function(v) Cfg.Trigger.TeamCheck=v end)
 S(Tabs.Combat,"TriggerDelay","Delay (ms)",0,1000,80,function(v) Cfg.Trigger.Delay=v end)
 Tabs.Combat:AddSection("Hitbox Extender")
 T(Tabs.Combat,"Hitbox","Enable Hitbox",function() return Cfg.Misc.HitboxExtender end,function(v) Cfg.Misc.HitboxExtender=v; RefreshHitboxes() end)
 T(Tabs.Combat,"HitboxTeamCheck","Team Check",function() return Cfg.Misc.TeamCheck end,function(v) Cfg.Misc.TeamCheck=v; RefreshHitboxes() end)
-Tabs.Combat:AddDropdown("HitboxPart",{Title="Hitbox Part",Values={"All","Head","Torso","Arms","Legs","HRP"},Multi=false,Default=Cfg.Misc.HitboxPart,Callback=function(v)
-    if HBP_SETS[v] then Cfg.Misc.HitboxPart=v; if Cfg.Misc.HitboxExtender then RefreshHitboxes() end end
-end})
+Tabs.Combat:AddParagraph({Title="Hitbox Part",Content="All (todas as partes compatíveis)"})
 S(Tabs.Combat,"HitboxSize","Hitbox Size",2,80,8,function(v) Cfg.Misc.HitboxSize=math.clamp(tonumber(v) or 8,2,80); if Cfg.Misc.HitboxExtender then RefreshHitboxes() end end)
 
 Tabs.Visuals:AddSection("ESP")
@@ -1507,6 +1533,7 @@ T(Tabs.Visuals,"TeamCheck","Team Check",function() return Cfg.ESP.TeamCheck end,
 T(Tabs.Visuals,"Skeleton","Skeleton",function() return Cfg.ESP.Skeleton end,function(v) Cfg.ESP.Skeleton=v end)
 S(Tabs.Visuals,"MaxDistance","Max Distance",50,10000,500,function(v) Cfg.ESP.MaxDist=v end)
 S(Tabs.Visuals,"ESPUpdateRate","ESP Update Rate (FPS)",1,60,30,function(v) Cfg.ESP.UpdateRate=v; _espInterval=1/math.max(v,1) end)
+T(Tabs.Visuals,"AdaptivePerformance","Atualização adaptativa",function() return Cfg.ESP.AdaptivePerformance end,function(v) Cfg.ESP.AdaptivePerformance=v end)
 T(Tabs.Visuals,"HeldTool","Show Item in Hand",function() return Cfg.ESP.HeldTool end,function(v) Cfg.ESP.HeldTool=v end)
 
 Tabs.Misc:AddSection("Movement")
@@ -1616,19 +1643,25 @@ SyncGuiFromCfg=function()
         Fly=Cfg.Misc.Fly, Noclip=Cfg.Misc.Noclip, Speed=Cfg.Misc.Speed,
         Jump=Cfg.Misc.JumpMod, AntiRag=Cfg.Misc.AntiRag, ClickTP=Cfg.Misc.ClickTp,
         AntiAFK=Cfg.Misc.AntiAFK, BlockGameInput=Cfg.Settings.BlockGameInput,
-        VSync=Cfg.Settings.VSync,
+        VSync=Cfg.Settings.VSync, AdaptivePerformance=Cfg.ESP.AdaptivePerformance,
     }
     for id,value in pairs(toggles) do set(id,value) end
     local sliders={
         FOVSize=Cfg.Aim.FOV, AimMaxDistance=Cfg.Aim.MaxDistance, TriggerDelay=Cfg.Trigger.Delay,
         HitboxSize=Cfg.Misc.HitboxSize, MaxDistance=Cfg.ESP.MaxDist,
         ESPUpdateRate=Cfg.ESP.UpdateRate, FlySpeed=Cfg.Misc.FlySpeed,
+        BackgroundTransparency=Cfg.Settings.BackgroundTransparency, UIScale=Cfg.Settings.UIScale,
+        WindowWidth=Cfg.Settings.WindowWidth, WindowHeight=Cfg.Settings.WindowHeight,
         WalkSpeed=Cfg.Misc.WalkSpeed, JumpPower=Cfg.Misc.JumpPower,
     }
     for id,value in pairs(sliders) do set(id,value) end
-    set("AimMode",Cfg.Aim.AimbotType); set("AimPart",Cfg.Aim.AimPart)
-    set("FocusPriority",Cfg.Aim.FocusPriority); set("HitboxPart",Cfg.Misc.HitboxPart)
+    set("AimMode",Cfg.Aim.AimbotType); set("AimPart",Cfg.Aim.AimPart); set("TriggerMode",Cfg.Trigger.Mode or "Semi")
+    set("FocusPriority",Cfg.Aim.FocusPriority)
     set("ESPMode",Cfg.ESP.Mode); set("ESPColor",Cfg.ESP.ESPColorName or "Red"); set("FOVColor",Cfg.Aim.FOVColorName); set("RadarColor",Cfg.ESP.RadarColorName)
+    if _customSelectors.ThemePreset then _customSelectors.ThemePreset.SetValue(Cfg.Settings.ThemePreset or "Dark") end
+    if _customSelectors.ESPColor then _customSelectors.ESPColor.SetValue(Cfg.ESP.ESPColorName or "Red") end
+    if _customSelectors.FOVColor then _customSelectors.FOVColor.SetValue(Cfg.Aim.FOVColorName or "Red") end
+    if _customSelectors.RadarColor then _customSelectors.RadarColor.SetValue(Cfg.ESP.RadarColorName or "Yellow") end
     for title,entry in pairs(_bindButtons) do
         if entry.Button and entry.Button.SetTitle then pcall(function() entry.Button:SetTitle(title..": ["..tostring(entry.GetName()).."]") end) end
     end
@@ -1721,18 +1754,67 @@ Tabs.Binds:AddButton({Title="Check Bind Conflicts",Callback=function()
     local conflicts=NotifyBindConflicts()
     if #conflicts==0 then Fluent:Notify({Title="Binds",Content="No conflicts detected.",Duration=2}) end
 end})
+Tabs.Binds:AddButton({Title="Clear All Binds",Callback=function()
+    Cfg.Settings.ToggleKey,Cfg.Settings.ToggleKeyName=Enum.KeyCode.Semicolon,"Semicolon"
+    Cfg.Settings.ESPKey,Cfg.Settings.ESPKeyName=Enum.KeyCode.F2,"F2"
+    Cfg.Settings.AimbotKey,Cfg.Settings.AimbotKeyName=Enum.KeyCode.F3,"F3"
+    Cfg.Settings.FlyKey,Cfg.Settings.FlyKeyName=Enum.KeyCode.F5,"F5"
+    Cfg.Settings.NoclipKey,Cfg.Settings.NoclipKeyName=Enum.KeyCode.F6,"F6"
+    Cfg.Settings.SpeedKey,Cfg.Settings.SpeedKeyName=Enum.KeyCode.F7,"F7"
+    Cfg.Settings.ClickTpKey,Cfg.Settings.ClickTpKeyName=Enum.KeyCode.F8,"F8"
+    Cfg.Aim.AimKey,Cfg.Aim.AimKeyName=Enum.KeyCode.E,"E"
+    for title,entry in pairs(_bindButtons) do if entry.Button and entry.Button.SetTitle then pcall(function() entry.Button:SetTitle(title..": ["..entry.GetName().."]") end) end end
+    NotifyBindConflicts()
+    Fluent:Notify({Title="Binds",Content="Todas as binds foram restauradas.",Duration=2})
+end})
+Tabs.Binds:AddParagraph({Title="Conflitos",Content="Os conflitos são verificados ao alterar uma bind e podem ser revisados pelo botão acima."})
 
 Tabs.Settings:AddSection("Control")
 T(Tabs.Settings,"BlockGameInput","Block game interaction while menu is open",function() return Cfg.Settings.BlockGameInput end,function(v) Cfg.Settings.BlockGameInput=v; SetHubFocus(_hubMenuOpen) end)
-local CustomColors={Red=Color3.fromRGB(220,40,40),Blue=Color3.fromRGB(40,130,240),Purple=Color3.fromRGB(160,50,220),Yellow=Color3.fromRGB(230,190,40),White=Color3.fromRGB(255,255,255)}
+local CustomColors={Red=Color3.fromRGB(220,40,40),Blue=Color3.fromRGB(40,130,240),Purple=Color3.fromRGB(160,50,220),Yellow=Color3.fromRGB(230,190,40),White=Color3.fromRGB(255,255,255),Green=Color3.fromRGB(50,210,100),Cyan=Color3.fromRGB(30,220,220),Orange=Color3.fromRGB(255,140,40),Pink=Color3.fromRGB(240,80,170),Aqua=Color3.fromRGB(60,180,255)}
+Tabs.Custom:AddSection("Aparência")
+-- Os seletores de aparência usam uma lista interna; os demais controles permanecem no formato Fluent atual.
+local _customSelectors={}
+local function CustomList(id,title,values,default,callback)
+    local index=1
+    for i,v in ipairs(values) do if v==default then index=i break end end
+    local function label() return title..": ["..tostring(values[index]).."]" end
+    local button
+    local function SetButtonLabel()
+        local text=label()
+        if not button then return end
+        pcall(function() if button.SetTitle then button:SetTitle(text) end end)
+        pcall(function() if button.Button and button.Button:IsA("TextButton") then button.Button.Text=text end end)
+        pcall(function() if button.Button and button.Button.TextLabel then button.Button.TextLabel.Text=text end end)
+        pcall(function() if button.Text then button.Text=text end end)
+    end
+    button=Tabs.Custom:AddButton({Title=label(),Callback=function()
+        index=(index%#values)+1
+        callback(values[index])
+        task.defer(SetButtonLabel)
+    end})
+    _customSelectors[id]={SetValue=function(value)
+        for i,v in ipairs(values) do if v==value then index=i break end end
+        callback(values[index])
+        task.defer(SetButtonLabel)
+    end}
+end
+local _themeValues={"Dark","Midnight","Purple","Aqua","Rose","Light"}
+CustomList("ThemePreset","Tema",_themeValues,Cfg.Settings.ThemePreset or "Dark",function(v)
+    Cfg.Settings.ThemePreset=v
+    local theme=(v=="Purple" and "Amethyst") or (v=="Midnight" and "Darker") or v
+    pcall(function() Fluent:SetTheme(theme) end)
+end)
+Tabs.Custom:AddParagraph({Title="Aparência",Content="Escolha um tema estável. O tema Purple usa o preset Amethyst da Fluent."})
 Tabs.Custom:AddSection("Personalização de cores")
-local ESPColors={Red=Color3.fromRGB(220,40,40),Blue=Color3.fromRGB(40,130,240),Purple=Color3.fromRGB(160,50,220),Yellow=Color3.fromRGB(230,190,40),White=Color3.fromRGB(255,255,255)}
-Tabs.Custom:AddDropdown("ESPColor",{Title="ESP Color",Values={"Red","Blue","Purple","Yellow","White"},Multi=false,Default=Cfg.ESP.ESPColorName or "Red",Callback=function(v)
+local ESPColors={Red=Color3.fromRGB(220,40,40),Blue=Color3.fromRGB(40,130,240),Purple=Color3.fromRGB(160,50,220),Yellow=Color3.fromRGB(230,190,40),White=Color3.fromRGB(255,255,255),Green=Color3.fromRGB(50,210,100),Cyan=Color3.fromRGB(30,220,220),Orange=Color3.fromRGB(255,140,40),Pink=Color3.fromRGB(240,80,170),Aqua=Color3.fromRGB(60,180,255)}
+local _colorValues={"Red","Blue","Purple","Yellow","White","Green","Cyan","Orange","Pink","Aqua"}
+CustomList("ESPColor","ESP Color",_colorValues,Cfg.ESP.ESPColorName or "Red",function(v)
     local c=ESPColors[v]
     if c then Cfg.ESP.ESPColorName=v; Cfg.ESP.BoxColor=c; Cfg.ESP.FillColor=c; Cfg.ESP.NameColor=c; Cfg.ESP.TracerColor=c; Cfg.ESP.DistColor=c; Cfg.ESP.SkelColor=c end
-end})
-Tabs.Custom:AddDropdown("FOVColor",{Title="Aim FOV Color",Values={"Red","Blue","Purple","Yellow","White"},Multi=false,Default=Cfg.Aim.FOVColorName,Callback=function(v) if CustomColors[v] then Cfg.Aim.FOVColorName=v end end})
-Tabs.Custom:AddDropdown("RadarColor",{Title="Radar Highlight Color",Values={"Red","Blue","Purple","Yellow","White"},Multi=false,Default=Cfg.ESP.RadarColorName,Callback=function(v) if CustomColors[v] then Cfg.ESP.RadarColorName=v end end})
+end)
+CustomList("FOVColor","Aim FOV Color",_colorValues,Cfg.Aim.FOVColorName or "Red",function(v) if CustomColors[v] then Cfg.Aim.FOVColorName=v end end)
+CustomList("RadarColor","Radar Highlight Color",_colorValues,Cfg.ESP.RadarColorName or "Yellow",function(v) if CustomColors[v] then Cfg.ESP.RadarColorName=v end end)
 Tabs.Custom:AddParagraph({Title="Aplicação",Content="As cores do FOV e do destaque individual do Radar/ESP são salvas junto com a configuração."})
 Tabs.Settings:AddSection("Diagnostics")
 Tabs.Settings:AddParagraph({Title="Runtime diagnostics",Content="Shows module state, recent errors, frame update time and managed resources."})
@@ -1781,22 +1863,25 @@ _G._223HUB_Shutdown=ShutdownHub
 Tabs.Settings:AddButton({Title="Unload 223JHUB",Callback=ShutdownHub})
 Tabs.Settings:AddParagraph({Title="Shutdown",Content="Stops all systems, disconnects events and removes the interface."})
 Tabs.Settings:AddSection("About")
-Tabs.Settings:AddParagraph({Title="Credits",Content="223JHUB 2.5 | Script by Bruno223J and TY | Revolutionarius Group"})
+Tabs.Settings:AddParagraph({Title="Credits",Content="223JHUB 3.0 | Script by Bruno223J and TY | Revolutionarius Group"})
 Tabs.Settings:AddParagraph({Title="Fluent UI",Content="Interface powered by Fluent UI Library."})
-Tabs.Credits:AddSection("223JHUB 2.5")
+Tabs.Credits:AddSection("223JHUB 3.0")
 Tabs.Credits:AddParagraph({Title="Developers",Content="Bruno223j and TY"})
 Tabs.Credits:AddParagraph({Title="Discord",Content="bruno223j & frty2017"})
-Tabs.Credits:AddParagraph({Title="Final Edition",Content="ESP, controls and cleanup finalized."})
+Tabs.Credits:AddParagraph({Title="Version 3.0",Content="Themes, colors, TriggerBot modes and adaptive performance updated."})
 Window:SelectTab(1)
-Fluent:Notify({Title="223JHUB 2.5",Content="Fluent interface loaded.",Duration=4})
+Fluent:Notify({Title="223JHUB 3.0",Content="Interface loaded with the latest updates.",Duration=4})
 -- O Fluent pode alterar o foco durante a montagem; aplica o estado final depois disso.
 task.defer(function()
+    RemoveInterfaceHint()
+    task.delay(0.15,RemoveInterfaceHint)
+    task.delay(0.6,RemoveInterfaceHint)
     SetHubFocus(_hubMenuOpen)
     pcall(function() UIS.MouseBehavior=Enum.MouseBehavior.Default end)
     pcall(function() UIS.MouseIconEnabled=true end)
 end)
 
-print("[223JHUB 2.5 RELEASE]  LOADED | BRUNO223J & TY | DISCORD | bruno223j | frty2017 | Toggle=[;]")
+print("[223JHUB 3.0 RELEASE]  LOADED | BRUNO223J & TY | DISCORD | bruno223j | frty2017 | Toggle=[;]")
 
 end -- fim de _223JHUB_MAIN()
 
