@@ -5,8 +5,7 @@
 -- 
 
 local _KCoreGui = game:GetService("CoreGui")
-local _KTween   = game:GetService("TweenService")
-local _KHttp    = game:GetService("HttpService")
+
 local _KLP      = game:GetService("Players").LocalPlayer
 
 local function GetGuiParent()
@@ -68,8 +67,7 @@ local function IsBindHeldNow(bind)
     end
     return false
 end
-local CoreGui         = game:GetService("CoreGui")
-local TweenService    = game:GetService("TweenService")
+
 local HttpService     = game:GetService("HttpService")
 local Workspace       = game:GetService("Workspace")
 local TeleportService = game:GetService("TeleportService")
@@ -228,14 +226,20 @@ end
 local function SerCfg()
     local t={ESP=SafeSer(Cfg.ESP),Aim=SafeSer(Cfg.Aim),
              Trigger=SafeSer(Cfg.Trigger),Misc=SafeSer(Cfg.Misc),
-             Settings=SafeSer(Cfg.Settings)}
+             Settings=SafeSer(Cfg.Settings),
+             Personalization={
+                 ThemePreset=Cfg.Settings.ThemePreset or "Dark",
+                 ESPColorName=Cfg.ESP.ESPColorName or "Red",
+                 FOVColorName=Cfg.Aim.FOVColorName or "Red",
+                 RadarColorName=Cfg.ESP.RadarColorName or "Yellow",
+             }}
     t.Aim.AimKeyName=Cfg.Aim.AimKeyName
     for k,v in pairs(Cfg.Settings) do if type(v)=="string" then t.Settings[k]=v end end
     return HttpService:JSONEncode(t)
 end
 local function ValidateConfig(t)
     if type(t)~="table" then return false,"Config root must be an object" end
-    for _,section in ipairs({"ESP","Aim","Trigger","Misc","Settings"}) do
+    for _,section in ipairs({"ESP","Aim","Trigger","Misc","Settings","Personalization"}) do
         if t[section]~=nil and type(t[section])~="table" then return false,"Section "..section.." must be an object" end
     end
     if t.Aim then
@@ -264,6 +268,15 @@ local function ApplySave(t)
     mg(Cfg.ESP,t.ESP); mg(Cfg.Aim,t.Aim)
     mg(Cfg.Trigger,t.Trigger); mg(Cfg.Misc,t.Misc)
     mg(Cfg.Settings,t.Settings)
+    -- Compatibilidade explícita com a seção nova de Personalization.
+    -- Também aceita saves antigos que guardavam estes campos dentro de ESP/Aim/Settings.
+    if type(t.Personalization)=="table" then
+        local p=t.Personalization
+        if type(p.ThemePreset)=="string" then Cfg.Settings.ThemePreset=p.ThemePreset end
+        if type(p.ESPColorName)=="string" then Cfg.ESP.ESPColorName=p.ESPColorName end
+        if type(p.FOVColorName)=="string" then Cfg.Aim.FOVColorName=p.FOVColorName end
+        if type(p.RadarColorName)=="string" then Cfg.ESP.RadarColorName=p.RadarColorName end
+    end
     local M3,M4,M5
     pcall(function() M3=Enum.UserInputType.MouseButton3; M4=Enum.UserInputType.MouseButton4; M5=Enum.UserInputType.MouseButton5 end)
     local function TK(n,fallback)
@@ -867,11 +880,8 @@ local function RefreshHitboxes()
 end
 
 -- ============================================================
--- ============================================================
 -- Deadline target resolver: uses the game's characters container instead of Players.Character.
-local function GetDeadlineCharacterFolder()
-    return Workspace:FindFirstChild("characters") or Workspace:FindFirstChild("Characters")
-end
+
 
 local function DeadlineRoot(model)
     return model and (model:FindFirstChild("HumanoidRootPart") or model:FindFirstChildWhichIsA("BasePart",true))
@@ -1101,7 +1111,6 @@ AC(RunService.RenderStepped:Connect(function(dt)
                 local tn=GetHeldTool(char)
                 if tn then SafeSet(d.Tool,{Position=Vector2.new(x+w/2,y-32),Text="["..tn.."]",Color=Cfg.ESP.ToolColor,Visible=true}) else SafeHide(d.Tool) end
             else SafeHide(d.Tool) end
-            local isAimTarget=(Cfg.ESP.RadarHighlight and Cfg.ESP.RadarTarget~="" and player.Name==Cfg.ESP.RadarTarget)
             if Cfg.ESP.Skeleton then
                 local bones=(char:FindFirstChild("Torso") and BONES_R6) or BONES_R15
                 for bi=1,MAX_BONES do
@@ -1210,7 +1219,7 @@ end
 -- ============================================================
 -- KEYBINDS
 -- ============================================================
-local _guiVisible=true
+
 _G._scrollAimPulse=false
 local M3,M4,M5
 pcall(function() M3=Enum.UserInputType.MouseButton3; M4=Enum.UserInputType.MouseButton4; M5=Enum.UserInputType.MouseButton5 end)
@@ -1405,35 +1414,6 @@ local function BindButton(tab,title,getName,setBind)
     _bindButtons[title]={Button=button,GetName=getName}
     return button
 end
--- Seletor interno: não cria popup nem janela flutuante; o clique avança pelos valores no próprio painel.
-local function LocalSelect(tab,id,title,values,default,callback)
-    local state={Values=values or {},Value=nil,Index=1,Button=nil}
-    local function findIndex(value)
-        for i,v in ipairs(state.Values) do if v==value then return i end end
-        return 1
-    end
-    state.Index=type(default)=="number" and math.clamp(default,1,math.max(#state.Values,1)) or findIndex(default)
-    state.Value=state.Values[state.Index]
-    local function refresh()
-        local text=title..": ["..tostring(state.Value or "").."]"
-        if state.Button and state.Button.SetTitle then pcall(function() state.Button:SetTitle(text) end) end
-    end
-    local object={Value=state.Value}
-    function object:SetValue(value)
-        state.Index=findIndex(value); state.Value=state.Values[state.Index]; object.Value=state.Value; refresh(); if callback then callback(state.Value) end
-    end
-    function object:SetValues(newValues)
-        state.Values=newValues or {}; state.Index=math.clamp(state.Index,1,math.max(#state.Values,1)); state.Value=state.Values[state.Index]; object.Value=state.Value; refresh()
-    end
-    state.Button=tab:AddButton({Title=title..": ["..tostring(state.Value or "").."]",Callback=function()
-        if #state.Values==0 then return end
-        state.Index=(state.Index%#state.Values)+1; state.Value=state.Values[state.Index]; object.Value=state.Value; refresh(); if callback then callback(state.Value) end
-    end})
-    object.Button=state.Button
-    Options[id]=object
-    if callback and state.Value~=nil then callback(state.Value) end
-    return object
-end
 Tabs.Combat:AddSection("Aimbot")
 T(Tabs.Combat,"Aimbot","Enable Aimbot",function() return Cfg.Aim.Aimbot end,function(v) Cfg.Aim.Aimbot=v end)
 Tabs.Combat:AddDropdown("AimMode",{Title="Aimbot Mode",Values={"Default (Universal)","AR2"},Multi=false,Default=Cfg.Aim.AimbotType,Callback=function(v) Cfg.Aim.AimbotType=v end})
@@ -1624,6 +1604,23 @@ end})
 -- Tools are scanned only after the user presses Load Tools.
 
 -- Atualização explícita dos controles Fluent após LoadCfg/importação.
+local _SaveColorMap={
+    Red=Color3.fromRGB(220,40,40), Blue=Color3.fromRGB(40,130,240), Purple=Color3.fromRGB(160,50,220),
+    Yellow=Color3.fromRGB(230,190,40), White=Color3.fromRGB(255,255,255), Green=Color3.fromRGB(50,210,100),
+    Cyan=Color3.fromRGB(30,220,220), Orange=Color3.fromRGB(255,140,40), Pink=Color3.fromRGB(240,80,170), Aqua=Color3.fromRGB(60,180,255)
+}
+local function ApplyLoadedPersonalization()
+    local theme=Cfg.Settings.ThemePreset or "Dark"
+    local fluentTheme=(theme=="Purple" and "Amethyst") or (theme=="Midnight" and "Darker") or theme
+    pcall(function() Fluent:SetTheme(fluentTheme) end)
+    local espName=Cfg.ESP.ESPColorName or "Red"
+    local espColor=_SaveColorMap[espName] or _SaveColorMap.Red
+    Cfg.ESP.ESPColorName=espName
+    Cfg.ESP.BoxColor=espColor; Cfg.ESP.FillColor=espColor; Cfg.ESP.NameColor=espColor
+    Cfg.ESP.TracerColor=espColor; Cfg.ESP.DistColor=espColor; Cfg.ESP.SkelColor=espColor
+    Cfg.Aim.FOVColorName=Cfg.Aim.FOVColorName or "Red"
+    Cfg.ESP.RadarColorName=Cfg.ESP.RadarColorName or "Yellow"
+end
 SyncGuiFromCfg=function()
     local function set(id,value)
         local option=Options and Options[id]
@@ -1645,6 +1642,7 @@ SyncGuiFromCfg=function()
         AntiAFK=Cfg.Misc.AntiAFK, BlockGameInput=Cfg.Settings.BlockGameInput,
         VSync=Cfg.Settings.VSync, AdaptivePerformance=Cfg.ESP.AdaptivePerformance,
     }
+    ApplyLoadedPersonalization()
     for id,value in pairs(toggles) do set(id,value) end
     local sliders={
         FOVSize=Cfg.Aim.FOV, AimMaxDistance=Cfg.Aim.MaxDistance, TriggerDelay=Cfg.Trigger.Delay,
@@ -1662,6 +1660,8 @@ SyncGuiFromCfg=function()
     if _customSelectors.ESPColor then _customSelectors.ESPColor.SetValue(Cfg.ESP.ESPColorName or "Red") end
     if _customSelectors.FOVColor then _customSelectors.FOVColor.SetValue(Cfg.Aim.FOVColorName or "Red") end
     if _customSelectors.RadarColor then _customSelectors.RadarColor.SetValue(Cfg.ESP.RadarColorName or "Yellow") end
+    -- Reaplica uma segunda vez depois do SetValue para evitar que callbacks da GUI sobrescrevam o save.
+    task.defer(function() pcall(ApplyLoadedPersonalization) end)
     for title,entry in pairs(_bindButtons) do
         if entry.Button and entry.Button.SetTitle then pcall(function() entry.Button:SetTitle(title..": ["..tostring(entry.GetName()).."]") end) end
     end
@@ -1692,6 +1692,16 @@ Tabs.Saves:AddButton({Title="Save Current",Callback=function()
     local name=(Options.SaveName and Options.SaveName.Value or ""):gsub("%s+","_")
     if name=="" then Fluent:Notify({Title="Saves",Content="Digite um nome.",Duration=2}); return end
     local ok,msg=SaveCfg(name); Fluent:Notify({Title="Saves",Content=ok and "Configuracao salva." or tostring(msg),Duration=2}); RefreshSaveList()
+end})
+Tabs.Saves:AddButton({Title="Update Selected Save",Callback=function()
+    local name=selectedSave
+    if not name or name=="No saves found" or name=="Press Refresh" then
+        Fluent:Notify({Title="Saves",Content="Selecione um save existente primeiro.",Duration=2})
+        return
+    end
+    local ok,msg=SaveCfg(name)
+    Fluent:Notify({Title="Saves",Content=ok and ("Save atualizado: "..name) or tostring(msg),Duration=2})
+    RefreshSaveList()
 end})
 Tabs.Saves:AddButton({Title="Load Selected",Callback=function()
     if not selectedSave or selectedSave=="No saves found" then return end
@@ -1885,5 +1895,5 @@ print("[223JHUB 3.0 RELEASE]  LOADED | BRUNO223J & TY | DISCORD | bruno223j | fr
 
 end -- fim de _223JHUB_MAIN()
 
--- Inicializacao direta sem autenticacao.
+
 _223HUB_MAIN()
