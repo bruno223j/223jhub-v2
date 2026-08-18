@@ -175,7 +175,8 @@ local Cfg = {
 
     },
     Aim = {
-        Aimbot=false, AimbotType="Default (Universal)", WallCheck=false, TeamCheck=false,
+                Aimbot=false, WallCheck=false, TeamCheck=false,
+
         Prediction=false, PredStr=3,
         FOV=150, ShowFOV=false, UseFOV=false, FOVFollow=false, CameraFollow=false,
         MaxDistanceEnabled=false, MaxDistance=500, FOVColorName="Red",
@@ -187,7 +188,10 @@ Trigger = { Enabled=false, TeamCheck=false, Delay=80, AutoBot=false, Mode="Semi"
                 ClickControl=false, ClickCount=3,
                 OneShot=false, OneShotDelay=3 },
     Misc = {
-        Fly=false, FlySpeed=50, FlyBoost=false, Noclip=false,
+                Fly=false, FlySpeed=50, FlyBoost=false,
+        VehicleFly=false, VehicleFlySpeed=100,
+        Noclip=false,
+
         Speed=false, WalkSpeed=25, AntiAFK=false,
         HitboxExtender=false, TeamCheck=false, HitboxSize=8,
         InfJump=false, AntiRag=false, ClickTp=false, SpinBot=false,
@@ -728,6 +732,63 @@ local function DisableFly()
 end
 
 -- ============================================================
+-- VEHICLE FLY
+-- ============================================================
+local _vehicleFlyConn,_vehicleBV,_vehicleBG,_vehiclePart=nil,nil,nil,nil
+local function GetVehiclePart()
+    local char=LP.Character
+    local hum=char and char:FindFirstChildOfClass("Humanoid")
+    local seat=hum and hum.SeatPart
+    if not seat or not (seat:IsA("Seat") or seat:IsA("VehicleSeat")) then return nil end
+    local model=seat:FindFirstAncestorOfClass("Model")
+    if not model then return nil end
+    if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then return model.PrimaryPart end
+    return model:FindFirstChildWhichIsA("BasePart",true)
+end
+local function DisableVehicleFly()
+    if _vehicleFlyConn then _vehicleFlyConn:Disconnect(); _vehicleFlyConn=nil end
+    if _vehicleBV then pcall(function() _vehicleBV:Destroy() end); _vehicleBV=nil end
+    if _vehicleBG then pcall(function() _vehicleBG:Destroy() end); _vehicleBG=nil end
+    _vehiclePart=nil
+end
+local function EnableVehicleFly()
+    if _vehicleFlyConn then return end
+    local part=GetVehiclePart()
+    if not part then
+        Cfg.Misc.VehicleFly=false
+        Fluent:Notify({Title="Vehicle Fly",Content="Sente-se em um carro antes de ativar.",Duration=3})
+        return
+    end
+    _vehiclePart=part
+    _vehicleBV=Instance.new("BodyVelocity")
+    _vehicleBV.MaxForce=Vector3.new(1e7,1e7,1e7)
+    _vehicleBV.Velocity=Vector3.zero
+    _vehicleBV.Parent=part
+    _vehicleBG=Instance.new("BodyGyro")
+    _vehicleBG.MaxTorque=Vector3.new(1e7,1e7,1e7)
+    _vehicleBG.P=2e4
+    _vehicleBG.D=500
+    _vehicleBG.CFrame=part.CFrame
+    _vehicleBG.Parent=part
+    _vehicleFlyConn=AC(RunService.RenderStepped:Connect(function()
+        if not Cfg.Misc.VehicleFly or not _vehiclePart or not _vehiclePart.Parent then
+            DisableVehicleFly(); return
+        end
+        local cf=Cam.CFrame
+        local speed=tonumber(Cfg.Misc.VehicleFlySpeed) or 100
+        local velocity=Vector3.zero
+        if UIS:IsKeyDown(Enum.KeyCode.W) then velocity=velocity+cf.LookVector*speed end
+        if UIS:IsKeyDown(Enum.KeyCode.S) then velocity=velocity-cf.LookVector*speed end
+        if UIS:IsKeyDown(Enum.KeyCode.A) then velocity=velocity-cf.RightVector*speed end
+        if UIS:IsKeyDown(Enum.KeyCode.D) then velocity=velocity+cf.RightVector*speed end
+        if UIS:IsKeyDown(Enum.KeyCode.Space) then velocity=velocity+Vector3.new(0,speed,0) end
+        if UIS:IsKeyDown(Enum.KeyCode.LeftShift) then velocity=velocity-Vector3.new(0,speed,0) end
+        _vehicleBV.Velocity=velocity
+        _vehicleBG.CFrame=CFrame.lookAt(_vehiclePart.Position,_vehiclePart.Position+cf.LookVector)
+    end))
+end
+
+-- ============================================================
 -- NOCLIP
 -- ============================================================
 local _ncConn=nil
@@ -877,9 +938,6 @@ end
 -- Deadline target resolver: uses the game's characters container instead of Players.Character.
 
 
-local function DeadlineRoot(model)
-    return model and (model:FindFirstChild("HumanoidRootPart") or model:FindFirstChildWhichIsA("BasePart",true))
-end
 
 local function DeadlinePlayer(model)
     local p=Players:GetPlayerFromCharacter(model)
@@ -1135,6 +1193,7 @@ AC(Players.PlayerRemoving:Connect(function(p)
 end))
 AC(LP.CharacterAdded:Connect(function()
     task.wait(0.5)
+    if Cfg.Misc.VehicleFly then Cfg.Misc.VehicleFly=false; DisableVehicleFly() end
     ApplySpeed()
     if Cfg.Misc.Fly then EnableFly() end
     if Cfg.Misc.Noclip then EnableNoclip() end
@@ -1155,6 +1214,31 @@ AC(UIS.InputBegan:Connect(function(input,gameProcessed)
         hrp.CFrame=CFrame.new(hit.Position+Vector3.new(0,3,0))
     end
 end))
+
+local teleportPlayerNames={"Press Load Players"}
+local teleportPlayerSelected=nil
+local function RefreshTeleportPlayers()
+    teleportPlayerNames={}
+    teleportPlayerSelected=nil
+    for _,player in ipairs(Players:GetPlayers()) do
+        if player~=LP then teleportPlayerNames[#teleportPlayerNames+1]=player.Name end
+    end
+    table.sort(teleportPlayerNames)
+    if #teleportPlayerNames==0 then teleportPlayerNames={"No players found"} else teleportPlayerSelected=teleportPlayerNames[1] end
+    if Options and Options.TeleportPlayer then Options.TeleportPlayer:SetValues(teleportPlayerNames) end
+end
+local function TeleportToSelectedPlayer()
+    local target=teleportPlayerSelected and Players:FindFirstChild(teleportPlayerSelected)
+    local targetChar=target and target.Character
+    local targetRoot=targetChar and targetChar:FindFirstChild("HumanoidRootPart")
+    local char=LP.Character
+    local root=char and char:FindFirstChild("HumanoidRootPart")
+    if not root or not targetRoot then
+        Fluent:Notify({Title="Teleport",Content="Selecione um jogador válido.",Duration=2})
+        return
+    end
+    root.CFrame=CFrame.new(targetRoot.Position+Vector3.new(0,3,0))
+end
 
 -- ============================================================
 -- TOOL HELPERS
@@ -1379,28 +1463,25 @@ local function NotifyBindConflicts()
     if #conflicts>0 then Fluent:Notify({Title="Bind conflict",Content=table.concat(conflicts," | "),Duration=4}) end
     return conflicts
 end
+local function UpdateVisibleText(prefix,text)
+    local changed=false
+    local root=_GuiParent
+    if not root then return false end
+    pcall(function()
+        for _,obj in ipairs(root:GetDescendants()) do
+            if (obj:IsA("TextLabel") or obj:IsA("TextButton")) and tostring(obj.Text):sub(1,#prefix)==prefix then
+                obj.Text=text; changed=true
+            end
+        end
+    end)
+    return changed
+end
 local waitingBind=false
 local _bindButtons={}
 local function SetBindButtonTitle(entry,text,title)
     if not entry then return end
-    local prefix=title and (title..": [") or nil
-    local changed=false
-    local function scan(root)
-        if typeof(root)~="Instance" then return end
-        pcall(function()
-            local objects={root}
-            for _,obj in ipairs(root:GetDescendants()) do objects[#objects+1]=obj end
-            for _,obj in ipairs(objects) do
-                if (obj:IsA("TextLabel") or obj:IsA("TextButton")) and (not prefix or tostring(obj.Text):sub(1,#prefix)==prefix) then
-                    obj.Text=text; changed=true
-                end
-            end
-        end)
-    end
-    local tab=entry.Tab
-    pcall(function() scan(tab and tab.Container) end)
-    pcall(function() scan(tab and tab.Frame) end)
-    pcall(function() scan(entry.Button and entry.Button.Button) end)
+    local prefix=title and (title..": [") or ""
+    local changed=UpdateVisibleText(prefix,text)
     if not changed then
         pcall(function() if entry.Button and entry.Button.SetTitle then entry.Button:SetTitle(text) end end)
     end
@@ -1441,7 +1522,7 @@ local function BindButton(tab,title,getName,setBind)
 end
 Tabs.Combat:AddSection("Aimbot")
 T(Tabs.Combat,"Aimbot","Enable Aimbot",function() return Cfg.Aim.Aimbot end,function(v) Cfg.Aim.Aimbot=v end)
-Tabs.Combat:AddDropdown("AimMode",{Title="Aimbot Mode",Values={"Default (Universal)","AR2"},Multi=false,Default=Cfg.Aim.AimbotType,Callback=function(v) Cfg.Aim.AimbotType=v end})
+
 Tabs.Combat:AddDropdown("AimPart",{Title="Target Part",Values={"Head","HumanoidRootPart","Torso","UpperTorso"},Multi=false,Default=Cfg.Aim.AimPart,Callback=function(v) Cfg.Aim.AimPart=v end})
 T(Tabs.Combat,"AimPrediction","Prediction",function() return Cfg.Aim.Prediction end,function(v) Cfg.Aim.Prediction=v end)
 T(Tabs.Combat,"AimWall","Wall Check",function() return Cfg.Aim.WallCheck end,function(v) Cfg.Aim.WallCheck=v end)
@@ -1484,6 +1565,7 @@ local function SetAimBind(bind,name)
     if not bind then return end
     Cfg.Aim.AimKey=bind
     Cfg.Aim.AimKeyName=name
+    UpdateVisibleText("Aim Lock Bind: [",AimBindLabel())
     if AimLockBind and AimLockBind.SetTitle then pcall(function() AimLockBind:SetTitle(AimBindLabel()) end) end
     NotifyBindConflicts()
 end
@@ -1544,6 +1626,8 @@ T(Tabs.Visuals,"HeldTool","Show Item in Hand",function() return Cfg.ESP.HeldTool
 Tabs.Misc:AddSection("Movement")
 T(Tabs.Misc,"Fly","Fly",function() return Cfg.Misc.Fly end,function(v) Cfg.Misc.Fly=v; if v then EnableFly() else DisableFly() end end)
 S(Tabs.Misc,"FlySpeed","Fly Speed",1,500,50,function(v) Cfg.Misc.FlySpeed=v end)
+T(Tabs.Misc,"VehicleFly","Vehicle Fly",function() return Cfg.Misc.VehicleFly end,function(v) Cfg.Misc.VehicleFly=v; if v then EnableVehicleFly() else DisableVehicleFly() end end)
+S(Tabs.Misc,"VehicleFlySpeed","Vehicle Fly Speed",25,1000,100,function(v) Cfg.Misc.VehicleFlySpeed=v end)
 T(Tabs.Misc,"Noclip","Noclip",function() return Cfg.Misc.Noclip end,function(v) Cfg.Misc.Noclip=v; if v then EnableNoclip() else DisableNoclip() end end)
 T(Tabs.Misc,"Speed","Speedhack",function() return Cfg.Misc.Speed end,function(v) Cfg.Misc.Speed=v; ApplySpeed() end)
 S(Tabs.Misc,"WalkSpeed","WalkSpeed",1,1000,25,function(v) Cfg.Misc.WalkSpeed=v; if Cfg.Misc.Speed then ApplySpeed() end end)
@@ -1551,9 +1635,19 @@ S(Tabs.Misc,"WalkSpeed","WalkSpeed",1,1000,25,function(v) Cfg.Misc.WalkSpeed=v; 
 Tabs.Misc:AddSection("Other")
 T(Tabs.Misc,"AntiRag","Anti Ragdoll",function() return Cfg.Misc.AntiRag end,function(v) Cfg.Misc.AntiRag=v end)
 T(Tabs.Misc,"ClickTP","Click Teleport",function() return Cfg.Misc.ClickTp end,function(v) Cfg.Misc.ClickTp=v end)
+Tabs.Misc:AddSection("Player Teleport")
+Tabs.Misc:AddParagraph({Title="Teleport to player",Content="Carregue a lista, selecione um jogador e use o botão de teleporte."})
+Tabs.Misc:AddDropdown("TeleportPlayer",{Title="Player to Teleport",Values=teleportPlayerNames,Multi=false,Default=1,Callback=function(v)
+    if v~="Press Load Players" and v~="No players found" then teleportPlayerSelected=v end
+end})
+Tabs.Misc:AddButton({Title="Load Teleport Players",Callback=RefreshTeleportPlayers})
+Tabs.Misc:AddButton({Title="Teleport to Selected Player",Callback=TeleportToSelectedPlayer})
+RefreshTeleportPlayers()
 T(Tabs.Misc,"AntiAFK","Anti AFK",function() return Cfg.Misc.AntiAFK end,function(v) Cfg.Misc.AntiAFK=v end)
 Tabs.Misc:AddButton({Title="Rejoin",Callback=Rejoin})
 Tabs.Misc:AddButton({Title="Server Hop",Callback=ServerHop})
+AC(Players.PlayerAdded:Connect(function() task.defer(RefreshTeleportPlayers) end))
+AC(Players.PlayerRemoving:Connect(function() task.defer(RefreshTeleportPlayers) end))
 
 Tabs.Spawn:AddSection("Tools")
 local toolEntries={}
@@ -1653,6 +1747,8 @@ SyncGuiFromCfg=function()
         end
     end
     local toggles={
+        AimPrediction=Cfg.Aim.Prediction, AimWall=Cfg.Aim.WallCheck, AimTeam=Cfg.Aim.TeamCheck,
+        FocusPriorityEnabled=Cfg.Aim.FocusPriorityEnabled,
         AimMaxDistanceEnabled=Cfg.Aim.MaxDistanceEnabled,
         RadarHighlight=Cfg.ESP.RadarHighlight,
         ESP=Cfg.ESP.Enabled, Box=Cfg.ESP.Box, Fill=Cfg.ESP.Fill,
@@ -1661,25 +1757,25 @@ SyncGuiFromCfg=function()
         HeldTool=Cfg.ESP.HeldTool, Aimbot=Cfg.Aim.Aimbot, ShowFOV=Cfg.Aim.ShowFOV,
         UseFOV=Cfg.Aim.UseFOV, CameraFollow=Cfg.Aim.CameraFollow, Trigger=Cfg.Trigger.Enabled, TriggerTeam=Cfg.Trigger.TeamCheck,
         Hitbox=Cfg.Misc.HitboxExtender, HitboxTeamCheck=Cfg.Misc.TeamCheck,
-        Fly=Cfg.Misc.Fly, Noclip=Cfg.Misc.Noclip, Speed=Cfg.Misc.Speed,
-                AntiRag=Cfg.Misc.AntiRag, ClickTP=Cfg.Misc.ClickTp,
-
+        Fly=Cfg.Misc.Fly, VehicleFly=Cfg.Misc.VehicleFly, Noclip=Cfg.Misc.Noclip, Speed=Cfg.Misc.Speed,
+        AntiRag=Cfg.Misc.AntiRag, ClickTP=Cfg.Misc.ClickTp,
         AntiAFK=Cfg.Misc.AntiAFK, BlockGameInput=Cfg.Settings.BlockGameInput,
         VSync=Cfg.Settings.VSync, AdaptivePerformance=Cfg.ESP.AdaptivePerformance,
     }
     ApplyLoadedPersonalization()
     for id,value in pairs(toggles) do set(id,value) end
     local sliders={
+        PredStrength=Cfg.Aim.PredStr, Smooth=Cfg.Aim.Smoothness, AimStrength=Cfg.Aim.AimStrength,
         FOVSize=Cfg.Aim.FOV, AimMaxDistance=Cfg.Aim.MaxDistance, TriggerDelay=Cfg.Trigger.Delay,
         HitboxSize=Cfg.Misc.HitboxSize, MaxDistance=Cfg.ESP.MaxDist,
-        ESPUpdateRate=Cfg.ESP.UpdateRate, FlySpeed=Cfg.Misc.FlySpeed,
+        ESPUpdateRate=Cfg.ESP.UpdateRate, FlySpeed=Cfg.Misc.FlySpeed, VehicleFlySpeed=Cfg.Misc.VehicleFlySpeed,
         BackgroundTransparency=Cfg.Settings.BackgroundTransparency, UIScale=Cfg.Settings.UIScale,
         WindowWidth=Cfg.Settings.WindowWidth, WindowHeight=Cfg.Settings.WindowHeight,
                 WalkSpeed=Cfg.Misc.WalkSpeed,
 
     }
     for id,value in pairs(sliders) do set(id,value) end
-    set("AimMode",Cfg.Aim.AimbotType); set("AimPart",Cfg.Aim.AimPart); set("TriggerMode",Cfg.Trigger.Mode or "Semi")
+    set("AimPart",Cfg.Aim.AimPart); set("TriggerMode",Cfg.Trigger.Mode or "Semi")
     set("FocusPriority",Cfg.Aim.FocusPriority)
     set("ESPMode",Cfg.ESP.Mode); set("ESPColor",Cfg.ESP.ESPColorName or "Red"); set("FOVColor",Cfg.Aim.FOVColorName); set("RadarColor",Cfg.ESP.RadarColorName)
     if _customSelectors.ThemePreset then _customSelectors.ThemePreset.SetValue(Cfg.Settings.ThemePreset or "Dark") end
@@ -1691,6 +1787,7 @@ SyncGuiFromCfg=function()
     for title,entry in pairs(_bindButtons) do
         SetBindButtonTitle(entry,title..": ["..tostring(entry.GetName() or "None").."]",title)
     end
+    UpdateVisibleText("Aim Lock Bind: [",AimBindLabel())
 end
 local function SyncGuiAfterLoad()
     if not SyncGuiFromCfg then return end
@@ -1800,6 +1897,7 @@ Tabs.Binds:AddButton({Title="Clear All Binds",Callback=function()
     Cfg.Settings.ClickTpKey,Cfg.Settings.ClickTpKeyName=Enum.KeyCode.F8,"F8"
     Cfg.Aim.AimKey,Cfg.Aim.AimKeyName=Enum.KeyCode.E,"E"
     for title,entry in pairs(_bindButtons) do SetBindButtonTitle(entry,title..": ["..tostring(entry.GetName() or "None").."]",title) end
+    UpdateVisibleText("Aim Lock Bind: [",AimBindLabel())
     NotifyBindConflicts()
     Fluent:Notify({Title="Binds",Content="Todas as binds foram restauradas.",Duration=2})
 end})
@@ -1818,22 +1916,19 @@ local function CustomList(id,title,values,default,callback)
     local button
     local function SetButtonLabel()
         local text=label()
-        if not button then return end
-        pcall(function() if button.SetTitle then button:SetTitle(text) end end)
-        pcall(function() if button.Button and button.Button:IsA("TextButton") then button.Button.Text=text end end)
-        pcall(function() if button.Button and button.Button.TextLabel then button.Button.TextLabel.Text=text end end)
-        pcall(function() if button.Text then button.Text=text end end)
+        local changed=UpdateVisibleText(title..": [",text)
+        if not changed then pcall(function() if button and button.SetTitle then button:SetTitle(text) end end) end
     end
     button=Tabs.Custom:AddButton({Title=label(),Callback=function()
         index=(index%#values)+1
         callback(values[index])
-        task.defer(SetButtonLabel)
+        SetButtonLabel()
     end})
     _customSelectors[id]={SetValue=function(value)
         for i,v in ipairs(values) do if v==value then index=i break end end
         callback(values[index])
-        task.defer(SetButtonLabel)
-    end}
+        SetButtonLabel()
+    end,Refresh=SetButtonLabel}
 end
 local _themeValues={"Dark","Midnight","Purple","Aqua","Rose","Light"}
 CustomList("ThemePreset","Tema",_themeValues,Cfg.Settings.ThemePreset or "Dark",function(v)
@@ -1843,10 +1938,10 @@ CustomList("ThemePreset","Tema",_themeValues,Cfg.Settings.ThemePreset or "Dark",
 end)
 Tabs.Custom:AddParagraph({Title="Aparência",Content="Escolha um tema estável. O tema Purple usa o preset Amethyst da Fluent."})
 Tabs.Custom:AddSection("Personalização de cores")
-local ESPColors={Red=Color3.fromRGB(220,40,40),Blue=Color3.fromRGB(40,130,240),Purple=Color3.fromRGB(160,50,220),Yellow=Color3.fromRGB(230,190,40),White=Color3.fromRGB(255,255,255),Green=Color3.fromRGB(50,210,100),Cyan=Color3.fromRGB(30,220,220),Orange=Color3.fromRGB(255,140,40),Pink=Color3.fromRGB(240,80,170),Aqua=Color3.fromRGB(60,180,255)}
+
 local _colorValues={"Red","Blue","Purple","Yellow","White","Green","Cyan","Orange","Pink","Aqua"}
 CustomList("ESPColor","ESP Color",_colorValues,Cfg.ESP.ESPColorName or "Red",function(v)
-    local c=ESPColors[v]
+    local c=CustomColors[v]
     if c then Cfg.ESP.ESPColorName=v; Cfg.ESP.BoxColor=c; Cfg.ESP.FillColor=c; Cfg.ESP.NameColor=c; Cfg.ESP.TracerColor=c; Cfg.ESP.DistColor=c; Cfg.ESP.SkelColor=c end
 end)
 CustomList("FOVColor","Aim FOV Color",_colorValues,Cfg.Aim.FOVColorName or "Red",function(v) if CustomColors[v] then Cfg.Aim.FOVColorName=v end end)
@@ -1868,8 +1963,8 @@ local function ShutdownHub()
     if _hubShutdown then return end
     -- Stop every feature first.
     Cfg.ESP.Enabled=false; Cfg.Aim.Aimbot=false; Cfg.Trigger.Enabled=false
-    Cfg.Misc.Fly=false; Cfg.Misc.Noclip=false; Cfg.Misc.Speed=false; Cfg.Misc.HitboxExtender=false
-    pcall(DisableFly); pcall(DisableNoclip); pcall(ApplySpeed)
+    Cfg.Misc.Fly=false; Cfg.Misc.VehicleFly=false; Cfg.Misc.Noclip=false; Cfg.Misc.Speed=false; Cfg.Misc.HitboxExtender=false
+    pcall(DisableFly); pcall(DisableVehicleFly); pcall(DisableNoclip); pcall(ApplySpeed)
     pcall(function() for player in pairs(_hbConns) do SetHitbox(player,false) end end)
     pcall(function() for player in pairs(_hbOriginals) do RestoreHitbox(player) end end)
     -- Remove both ESP pools, including Deadline models not represented by Players.
