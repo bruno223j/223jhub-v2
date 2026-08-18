@@ -168,7 +168,7 @@ local Cfg = {
         MaxDist=500, TrackList={}, AdaptivePerformance=false,
         BoxColor=Color3.fromRGB(220,40,40), FillColor=Color3.fromRGB(220,40,40),
         NameColor=Color3.fromRGB(255,255,255), TracerColor=Color3.fromRGB(220,40,40),
-        DistColor=Color3.fromRGB(200,200,200), HPColor=Color3.fromRGB(0,255,0),
+        DistColor=Color3.fromRGB(200,200,200),
         HPBgColor=Color3.fromRGB(60,0,0), ToolColor=Color3.fromRGB(255,210,50),
         Skeleton=false, SkelColor=Color3.fromRGB(0,220,255), Mode="Default (Universal)",
                 UpdateRate=30, RadarEnabled=false, RadarTarget="", RadarHighlight=false, RadarColorName="Yellow", ESPColorName="Red",
@@ -184,7 +184,7 @@ local Cfg = {
         AimKey=Enum.KeyCode.E, AimKeyName="E",
         AimStrength=70, Blacklist={}, FocusPriorityEnabled=false, FocusPriority="Closest",
     },
-Trigger = { Enabled=false, TeamCheck=false, Delay=80, AutoBot=false, Mode="Semi",
+Trigger = { Enabled=false, TeamCheck=false, Delay=80, Mode="Semi",
                 ClickControl=false, ClickCount=3,
                 OneShot=false, OneShotDelay=3 },
     Misc = {
@@ -194,8 +194,8 @@ Trigger = { Enabled=false, TeamCheck=false, Delay=80, AutoBot=false, Mode="Semi"
 
         Speed=false, WalkSpeed=25, AntiAFK=false,
         HitboxExtender=false, TeamCheck=false, HitboxSize=8,
-        InfJump=false, AntiRag=false, ClickTp=false, SpinBot=false,
-        CrashLag=false, AutoJump=false,
+        InfJump=false, AntiRag=false, ClickTp=false,
+        
         AlwaysSprint=false,
     },
     Settings = {
@@ -208,8 +208,8 @@ SpeedKey=Enum.KeyCode.F7,    SpeedKeyName="F7",
         ClickTpKey=Enum.KeyCode.F8, ClickTpKeyName="F8",
         ToggleKeyName="Mouse3",
         BlockGameInput=false, VSync=true,
-        ThemePreset="Dark", AccentColorName="Blue", TextColorName="White",
-        BackgroundTransparency=0.12, UIScale=1, WindowWidth=760, WindowHeight=560,
+        ThemePreset="Dark",
+        WindowWidth=760, WindowHeight=560,
     },
 }
 
@@ -1122,18 +1122,7 @@ AC(RunService.RenderStepped:Connect(function(dt)
         if not char or not hrp then HideESP(d); continue end
 
         local dist=GetDist(char) or math.huge
-        local bx,by,bw,bh
-        local deadlineMode=(Cfg.ESP.Mode=="Deadline")
-        if deadlineMode then
-            local rootPos,onScreen=Cam:WorldToViewportPoint(hrp.Position)
-            if not onScreen or rootPos.Z<0 then HideESP(d); continue end
-            local topPos=Cam:WorldToViewportPoint(hrp.Position+Vector3.new(0,2.5,0))
-            local bottomPos=Cam:WorldToViewportPoint(hrp.Position-Vector3.new(0,3,0))
-            bh=math.abs(topPos.Y-bottomPos.Y); bw=bh*0.6
-            bx=rootPos.X-bw/2; by=math.min(topPos.Y,bottomPos.Y)
-        else
-            bx,by,bw,bh=GetBounds(char)
-        end
+        local bx,by,bw,bh=GetBounds(char)
         local visible=(not Cfg.ESP.WallCheck) or IsVisibleCached(player,char)
         local radarFilter=Cfg.ESP.RadarEnabled and not Cfg.ESP.RadarHighlight
         local radarAllowed=not radarFilter or Cfg.ESP.RadarTarget=="" or player.Name==Cfg.ESP.RadarTarget
@@ -1146,9 +1135,9 @@ AC(RunService.RenderStepped:Connect(function(dt)
             local x,y,w,h=bx,by,bw,bh
             local radarFocus=Cfg.ESP.RadarHighlight and Cfg.ESP.RadarTarget~="" and player and player.Name==Cfg.ESP.RadarTarget
             local radarColor=FOVColors[Cfg.ESP.RadarColorName] or FOVColors.Yellow
-            local boxColor=radarFocus and radarColor or (deadlineMode and Color3.fromRGB(0,255,255) or Cfg.ESP.BoxColor)
-            local nameColor=radarFocus and radarColor or (deadlineMode and Color3.fromRGB(255,255,100) or Cfg.ESP.NameColor)
-            local tracerColor=radarFocus and radarColor or (deadlineMode and Color3.fromRGB(255,0,0) or Cfg.ESP.TracerColor)
+            local boxColor=radarFocus and radarColor or Cfg.ESP.BoxColor
+            local nameColor=radarFocus and radarColor or Cfg.ESP.NameColor
+            local tracerColor=radarFocus and radarColor or Cfg.ESP.TracerColor
             if Cfg.ESP.Box then SafeSet(d.Box,{Position=Vector2.new(x,y),Size=Vector2.new(w,h),Color=boxColor,Transparency=0.7,Visible=true}) else SafeHide(d.Box) end
             if Cfg.ESP.Fill then SafeSet(d.Fill,{Position=Vector2.new(x,y),Size=Vector2.new(w,h),Color=radarFocus and radarColor or Cfg.ESP.FillColor,Transparency=0.7,Visible=true}) else SafeHide(d.Fill) end
             if Cfg.ESP.Names then SafeSet(d.Name,{Position=Vector2.new(x+w/2,y-18),Text=player.DisplayName,Color=nameColor,Visible=true}) else SafeHide(d.Name) end
@@ -1774,7 +1763,7 @@ SyncGuiFromCfg=function()
         FOVSize=Cfg.Aim.FOV, AimMaxDistance=Cfg.Aim.MaxDistance, TriggerDelay=Cfg.Trigger.Delay,
         HitboxSize=Cfg.Misc.HitboxSize, MaxDistance=Cfg.ESP.MaxDist,
         ESPUpdateRate=Cfg.ESP.UpdateRate, FlySpeed=Cfg.Misc.FlySpeed, VehicleFlySpeed=Cfg.Misc.VehicleFlySpeed,
-        BackgroundTransparency=Cfg.Settings.BackgroundTransparency, UIScale=Cfg.Settings.UIScale,
+        
         WindowWidth=Cfg.Settings.WindowWidth, WindowHeight=Cfg.Settings.WindowHeight,
                 WalkSpeed=Cfg.Misc.WalkSpeed,
 
