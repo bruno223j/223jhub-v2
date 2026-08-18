@@ -190,20 +190,19 @@ Trigger = { Enabled=false, TeamCheck=false, Delay=80, AutoBot=false, Mode="Semi"
         Fly=false, FlySpeed=50, FlyBoost=false, Noclip=false,
         Speed=false, WalkSpeed=25, AntiAFK=false,
         HitboxExtender=false, TeamCheck=false, HitboxSize=8,
-        JumpMod=false, JumpPower=80, JumpMethod="JumpPower",
         InfJump=false, AntiRag=false, ClickTp=false, SpinBot=false,
         CrashLag=false, AutoJump=false,
         AlwaysSprint=false,
     },
     Settings = {
-        ToggleKey=Enum.KeyCode.Semicolon,
+        ToggleKey=Enum.UserInputType.MouseButton3,
         ESPKey=Enum.KeyCode.F2,      ESPKeyName="F2",
         AimbotKey=Enum.KeyCode.F3,   AimbotKeyName="F3",
         FlyKey=Enum.KeyCode.F5,      FlyKeyName="F5",
         NoclipKey=Enum.KeyCode.F6,   NoclipKeyName="F6",
 SpeedKey=Enum.KeyCode.F7,    SpeedKeyName="F7",
         ClickTpKey=Enum.KeyCode.F8, ClickTpKeyName="F8",
-        ToggleKeyName="Semicolon",
+        ToggleKeyName="Mouse3",
         BlockGameInput=false, VSync=true,
         ThemePreset="Dark", AccentColorName="Blue", TextColorName="White",
         BackgroundTransparency=0.12, UIScale=1, WindowWidth=760, WindowHeight=560,
@@ -297,7 +296,7 @@ local function ApplySave(t)
         return (current and current~=Enum.KeyCode.Unknown) and current or default
     end
     Cfg.Aim.AimKey=TK(Cfg.Aim.AimKeyName,KeepBind(Cfg.Aim.AimKey,Enum.KeyCode.E))
-    Cfg.Settings.ToggleKey=TK(Cfg.Settings.ToggleKeyName,KeepBind(Cfg.Settings.ToggleKey,Enum.KeyCode.Semicolon))
+    Cfg.Settings.ToggleKey=TK(Cfg.Settings.ToggleKeyName,KeepBind(Cfg.Settings.ToggleKey,Enum.UserInputType.MouseButton3))
     Cfg.Settings.ESPKey=TK(Cfg.Settings.ESPKeyName,KeepBind(Cfg.Settings.ESPKey,Enum.KeyCode.F2))
     Cfg.Settings.AimbotKey=TK(Cfg.Settings.AimbotKeyName,KeepBind(Cfg.Settings.AimbotKey,Enum.KeyCode.F3))
     Cfg.Settings.FlyKey=TK(Cfg.Settings.FlyKeyName,KeepBind(Cfg.Settings.FlyKey,Enum.KeyCode.F5))
@@ -767,12 +766,7 @@ local function ApplySpeed()
     local hum=char:FindFirstChildOfClass("Humanoid"); if not hum then return end
     hum.WalkSpeed=Cfg.Misc.Speed and Cfg.Misc.WalkSpeed or 16
 end
-local function ApplyJump()
-    local char=LP.Character; if not char then return end
-    local hum=char:FindFirstChildOfClass("Humanoid"); if not hum then return end
-    if not Cfg.Misc.JumpMod then hum.JumpPower=50; return end
-    hum.JumpPower=Cfg.Misc.JumpPower
-end
+
 AC(UIS.JumpRequest:Connect(function()
     if not Cfg.Misc.InfJump then return end
     local char=LP.Character; if not char then return end
@@ -1141,7 +1135,7 @@ AC(Players.PlayerRemoving:Connect(function(p)
 end))
 AC(LP.CharacterAdded:Connect(function()
     task.wait(0.5)
-    ApplySpeed(); ApplyJump()
+    ApplySpeed()
     if Cfg.Misc.Fly then EnableFly() end
     if Cfg.Misc.Noclip then EnableNoclip() end
 end))
@@ -1244,6 +1238,7 @@ local function BindMatches(inp,bind)
         if inp.UserInputType~=Enum.UserInputType.MouseWheel then return false end
         return (bind=="ScrollUp" and inp.Position.Z>0) or (bind=="ScrollDown" and inp.Position.Z<0)
     end
+    if bind==Enum.UserInputType.MouseButton3 and inp.UserInputType==Enum.UserInputType.MouseButton3 then return true end
     if inp.UserInputType~=Enum.UserInputType.Keyboard then return inp.UserInputType==bind end
     return inp.KeyCode==bind
 end
@@ -1386,8 +1381,36 @@ local function NotifyBindConflicts()
 end
 local waitingBind=false
 local _bindButtons={}
+local function SetBindButtonTitle(entry,text,title)
+    if not entry then return end
+    local prefix=title and (title..": [") or nil
+    local changed=false
+    local function scan(root)
+        if typeof(root)~="Instance" then return end
+        pcall(function()
+            local objects={root}
+            for _,obj in ipairs(root:GetDescendants()) do objects[#objects+1]=obj end
+            for _,obj in ipairs(objects) do
+                if (obj:IsA("TextLabel") or obj:IsA("TextButton")) and (not prefix or tostring(obj.Text):sub(1,#prefix)==prefix) then
+                    obj.Text=text; changed=true
+                end
+            end
+        end)
+    end
+    local tab=entry.Tab
+    pcall(function() scan(tab and tab.Container) end)
+    pcall(function() scan(tab and tab.Frame) end)
+    pcall(function() scan(entry.Button and entry.Button.Button) end)
+    if not changed then
+        pcall(function() if entry.Button and entry.Button.SetTitle then entry.Button:SetTitle(text) end end)
+    end
+end
 local function BindButton(tab,title,getName,setBind)
-    local button=tab:AddButton({Title=title..": ["..getName().."]",Callback=function()
+    local entry={Tab=tab}
+    local function bindLabel()
+        return title..": ["..tostring(getName() or "None").."]"
+    end
+    local button=tab:AddButton({Title=bindLabel(),Callback=function()
         if waitingBind then return end
         waitingBind=true
         Fluent:Notify({Title="Bind",Content="Pressione uma tecla ou Mouse1/Mouse2",Duration=3})
@@ -1404,14 +1427,16 @@ local function BindButton(tab,title,getName,setBind)
             elseif M5 and inp.UserInputType==M5 then code,name=M5,"Mouse5"
             elseif inp.UserInputType==Enum.UserInputType.MouseWheel then code,name=(inp.Position.Z>0 and "ScrollUp" or "ScrollDown"), (inp.Position.Z>0 and "ScrollUp" or "ScrollDown") end
             if code then
-                cn:Disconnect(); waitingBind=false; setBind(code,name)
-                pcall(function() if button and button.SetTitle then button:SetTitle(title..": ["..name.."]") end end)
+                cn:Disconnect(); waitingBind=false
+                setBind(code,name)
+                SetBindButtonTitle(entry,bindLabel(),title)
                 NotifyBindConflicts()
                 Fluent:Notify({Title="Bind updated",Content=title.." = "..name,Duration=2})
             end
                 end)
     end})
-    _bindButtons[title]={Button=button,GetName=getName}
+    entry.Button=button; entry.GetName=getName
+    _bindButtons[title]=entry
     return button
 end
 Tabs.Combat:AddSection("Aimbot")
@@ -1522,8 +1547,7 @@ S(Tabs.Misc,"FlySpeed","Fly Speed",1,500,50,function(v) Cfg.Misc.FlySpeed=v end)
 T(Tabs.Misc,"Noclip","Noclip",function() return Cfg.Misc.Noclip end,function(v) Cfg.Misc.Noclip=v; if v then EnableNoclip() else DisableNoclip() end end)
 T(Tabs.Misc,"Speed","Speedhack",function() return Cfg.Misc.Speed end,function(v) Cfg.Misc.Speed=v; ApplySpeed() end)
 S(Tabs.Misc,"WalkSpeed","WalkSpeed",1,1000,25,function(v) Cfg.Misc.WalkSpeed=v; if Cfg.Misc.Speed then ApplySpeed() end end)
-T(Tabs.Misc,"Jump","Jump Modifier",function() return Cfg.Misc.JumpMod end,function(v) Cfg.Misc.JumpMod=v; ApplyJump() end)
-S(Tabs.Misc,"JumpPower","Jump Power",1,500,80,function(v) Cfg.Misc.JumpPower=v; if Cfg.Misc.JumpMod then ApplyJump() end end)
+
 Tabs.Misc:AddSection("Other")
 T(Tabs.Misc,"AntiRag","Anti Ragdoll",function() return Cfg.Misc.AntiRag end,function(v) Cfg.Misc.AntiRag=v end)
 T(Tabs.Misc,"ClickTP","Click Teleport",function() return Cfg.Misc.ClickTp end,function(v) Cfg.Misc.ClickTp=v end)
@@ -1638,7 +1662,8 @@ SyncGuiFromCfg=function()
         UseFOV=Cfg.Aim.UseFOV, CameraFollow=Cfg.Aim.CameraFollow, Trigger=Cfg.Trigger.Enabled, TriggerTeam=Cfg.Trigger.TeamCheck,
         Hitbox=Cfg.Misc.HitboxExtender, HitboxTeamCheck=Cfg.Misc.TeamCheck,
         Fly=Cfg.Misc.Fly, Noclip=Cfg.Misc.Noclip, Speed=Cfg.Misc.Speed,
-        Jump=Cfg.Misc.JumpMod, AntiRag=Cfg.Misc.AntiRag, ClickTP=Cfg.Misc.ClickTp,
+                AntiRag=Cfg.Misc.AntiRag, ClickTP=Cfg.Misc.ClickTp,
+
         AntiAFK=Cfg.Misc.AntiAFK, BlockGameInput=Cfg.Settings.BlockGameInput,
         VSync=Cfg.Settings.VSync, AdaptivePerformance=Cfg.ESP.AdaptivePerformance,
     }
@@ -1650,7 +1675,8 @@ SyncGuiFromCfg=function()
         ESPUpdateRate=Cfg.ESP.UpdateRate, FlySpeed=Cfg.Misc.FlySpeed,
         BackgroundTransparency=Cfg.Settings.BackgroundTransparency, UIScale=Cfg.Settings.UIScale,
         WindowWidth=Cfg.Settings.WindowWidth, WindowHeight=Cfg.Settings.WindowHeight,
-        WalkSpeed=Cfg.Misc.WalkSpeed, JumpPower=Cfg.Misc.JumpPower,
+                WalkSpeed=Cfg.Misc.WalkSpeed,
+
     }
     for id,value in pairs(sliders) do set(id,value) end
     set("AimMode",Cfg.Aim.AimbotType); set("AimPart",Cfg.Aim.AimPart); set("TriggerMode",Cfg.Trigger.Mode or "Semi")
@@ -1663,7 +1689,7 @@ SyncGuiFromCfg=function()
     -- Reaplica uma segunda vez depois do SetValue para evitar que callbacks da GUI sobrescrevam o save.
     task.defer(function() pcall(ApplyLoadedPersonalization) end)
     for title,entry in pairs(_bindButtons) do
-        if entry.Button and entry.Button.SetTitle then pcall(function() entry.Button:SetTitle(title..": ["..tostring(entry.GetName()).."]") end) end
+        SetBindButtonTitle(entry,title..": ["..tostring(entry.GetName() or "None").."]",title)
     end
 end
 local function SyncGuiAfterLoad()
@@ -1765,7 +1791,7 @@ Tabs.Binds:AddButton({Title="Check Bind Conflicts",Callback=function()
     if #conflicts==0 then Fluent:Notify({Title="Binds",Content="No conflicts detected.",Duration=2}) end
 end})
 Tabs.Binds:AddButton({Title="Clear All Binds",Callback=function()
-    Cfg.Settings.ToggleKey,Cfg.Settings.ToggleKeyName=Enum.KeyCode.Semicolon,"Semicolon"
+    Cfg.Settings.ToggleKey,Cfg.Settings.ToggleKeyName=Enum.UserInputType.MouseButton3,"Mouse3"
     Cfg.Settings.ESPKey,Cfg.Settings.ESPKeyName=Enum.KeyCode.F2,"F2"
     Cfg.Settings.AimbotKey,Cfg.Settings.AimbotKeyName=Enum.KeyCode.F3,"F3"
     Cfg.Settings.FlyKey,Cfg.Settings.FlyKeyName=Enum.KeyCode.F5,"F5"
@@ -1773,7 +1799,7 @@ Tabs.Binds:AddButton({Title="Clear All Binds",Callback=function()
     Cfg.Settings.SpeedKey,Cfg.Settings.SpeedKeyName=Enum.KeyCode.F7,"F7"
     Cfg.Settings.ClickTpKey,Cfg.Settings.ClickTpKeyName=Enum.KeyCode.F8,"F8"
     Cfg.Aim.AimKey,Cfg.Aim.AimKeyName=Enum.KeyCode.E,"E"
-    for title,entry in pairs(_bindButtons) do if entry.Button and entry.Button.SetTitle then pcall(function() entry.Button:SetTitle(title..": ["..entry.GetName().."]") end) end end
+    for title,entry in pairs(_bindButtons) do SetBindButtonTitle(entry,title..": ["..tostring(entry.GetName() or "None").."]",title) end
     NotifyBindConflicts()
     Fluent:Notify({Title="Binds",Content="Todas as binds foram restauradas.",Duration=2})
 end})
@@ -1842,8 +1868,8 @@ local function ShutdownHub()
     if _hubShutdown then return end
     -- Stop every feature first.
     Cfg.ESP.Enabled=false; Cfg.Aim.Aimbot=false; Cfg.Trigger.Enabled=false
-    Cfg.Misc.Fly=false; Cfg.Misc.Noclip=false; Cfg.Misc.Speed=false; Cfg.Misc.JumpMod=false; Cfg.Misc.HitboxExtender=false
-    pcall(DisableFly); pcall(DisableNoclip); pcall(ApplySpeed); pcall(ApplyJump)
+    Cfg.Misc.Fly=false; Cfg.Misc.Noclip=false; Cfg.Misc.Speed=false; Cfg.Misc.HitboxExtender=false
+    pcall(DisableFly); pcall(DisableNoclip); pcall(ApplySpeed)
     pcall(function() for player in pairs(_hbConns) do SetHitbox(player,false) end end)
     pcall(function() for player in pairs(_hbOriginals) do RestoreHitbox(player) end end)
     -- Remove both ESP pools, including Deadline models not represented by Players.
