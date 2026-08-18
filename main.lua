@@ -1217,24 +1217,32 @@ end))
 
 local teleportPlayerNames={"Press Load Players"}
 local teleportPlayerSelected=nil
+local teleportPlayerMap={}
+local teleportPlayerDropdown=nil
 local function RefreshTeleportPlayers()
-    teleportPlayerNames={}
-    teleportPlayerSelected=nil
+    teleportPlayerNames={}; teleportPlayerMap={}; teleportPlayerSelected=nil
     for _,player in ipairs(Players:GetPlayers()) do
-        if player~=LP then teleportPlayerNames[#teleportPlayerNames+1]=player.Name end
+        if player~=LP then
+            local label=player.Name
+            teleportPlayerNames[#teleportPlayerNames+1]=label
+            teleportPlayerMap[label]=player.Name
+        end
     end
     table.sort(teleportPlayerNames)
-    if #teleportPlayerNames==0 then teleportPlayerNames={"No players found"} else teleportPlayerSelected=teleportPlayerNames[1] end
-    if Options and Options.TeleportPlayer then Options.TeleportPlayer:SetValues(teleportPlayerNames) end
+    if #teleportPlayerNames==0 then teleportPlayerNames={"No players found"} end
+    if teleportPlayerDropdown and teleportPlayerDropdown.SetValues then
+        pcall(function() teleportPlayerDropdown:SetValues(teleportPlayerNames) end)
+    end
 end
 local function TeleportToSelectedPlayer()
-    local target=teleportPlayerSelected and Players:FindFirstChild(teleportPlayerSelected)
+    local targetName=teleportPlayerMap[teleportPlayerSelected] or teleportPlayerSelected
+    local target=targetName and Players:FindFirstChild(targetName)
     local targetChar=target and target.Character
     local targetRoot=targetChar and targetChar:FindFirstChild("HumanoidRootPart")
     local char=LP.Character
     local root=char and char:FindFirstChild("HumanoidRootPart")
-    if not root or not targetRoot then
-        Fluent:Notify({Title="Teleport",Content="Selecione um jogador válido.",Duration=2})
+    if not root or not targetRoot or target==LP then
+        Fluent:Notify({Title="Teleport",Content="Carregue os jogadores e selecione um alvo válido.",Duration=2})
         return
     end
     root.CFrame=CFrame.new(targetRoot.Position+Vector3.new(0,3,0))
@@ -1637,17 +1645,14 @@ T(Tabs.Misc,"AntiRag","Anti Ragdoll",function() return Cfg.Misc.AntiRag end,func
 T(Tabs.Misc,"ClickTP","Click Teleport",function() return Cfg.Misc.ClickTp end,function(v) Cfg.Misc.ClickTp=v end)
 Tabs.Misc:AddSection("Player Teleport")
 Tabs.Misc:AddParagraph({Title="Teleport to player",Content="Carregue a lista, selecione um jogador e use o botão de teleporte."})
-Tabs.Misc:AddDropdown("TeleportPlayer",{Title="Player to Teleport",Values=teleportPlayerNames,Multi=false,Default=1,Callback=function(v)
-    if v~="Press Load Players" and v~="No players found" then teleportPlayerSelected=v end
+teleportPlayerDropdown=Tabs.Misc:AddDropdown("TeleportPlayer",{Title="Players / status",Values=teleportPlayerNames,Multi=false,Default=1,Callback=function(v)
+    if v~="Press Load Players" and v~="No players found" then teleportPlayerSelected=teleportPlayerMap[v] or v end
 end})
-Tabs.Misc:AddButton({Title="Load Teleport Players",Callback=RefreshTeleportPlayers})
+Tabs.Misc:AddButton({Title="Load Players",Callback=RefreshTeleportPlayers})
 Tabs.Misc:AddButton({Title="Teleport to Selected Player",Callback=TeleportToSelectedPlayer})
-RefreshTeleportPlayers()
 T(Tabs.Misc,"AntiAFK","Anti AFK",function() return Cfg.Misc.AntiAFK end,function(v) Cfg.Misc.AntiAFK=v end)
 Tabs.Misc:AddButton({Title="Rejoin",Callback=Rejoin})
 Tabs.Misc:AddButton({Title="Server Hop",Callback=ServerHop})
-AC(Players.PlayerAdded:Connect(function() task.defer(RefreshTeleportPlayers) end))
-AC(Players.PlayerRemoving:Connect(function() task.defer(RefreshTeleportPlayers) end))
 
 Tabs.Spawn:AddSection("Tools")
 local toolEntries={}
