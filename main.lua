@@ -465,10 +465,14 @@ local function SameTeam(p)
     return mt~=nil and pt~=nil and mt==pt
 end
 
-local function IsValidTarget(p)
+local function IsAimExcluded(p)
     if not p or p==LP then return false end
     if type(Cfg.Aim.Blacklist)~="table" then Cfg.Aim.Blacklist={} end
-    if Cfg.Aim.Blacklist[p.Name]==true then return false end
+    return Cfg.Aim.Blacklist[p.Name]==true
+end
+local function IsValidTarget(p)
+    if not p or p==LP then return false end
+    if IsAimExcluded(p) then return false end
     if Cfg.Aim.TeamCheck and SameTeam(p) then return false end
     local c=p.Character; if not c then return false end
     local h=c:FindFirstChildOfClass("Humanoid")
@@ -675,7 +679,7 @@ AC(RunService.Heartbeat:Connect(function()
     local tgt=Mouse.Target
     local model=tgt and tgt:FindFirstAncestorOfClass("Model")
     local p=model and Players:GetPlayerFromCharacter(model)
-    if not p or not IsValidTarget(p) or (Cfg.Trigger.TeamCheck and SameTeam(p)) then _StopBurst(); return end
+    if not p or IsAimExcluded(p) or not IsValidTarget(p) or (Cfg.Trigger.TeamCheck and SameTeam(p)) then _StopBurst(); return end
     local mode=Cfg.Trigger.Mode or (Cfg.Trigger.OneShot and "One-Shot" or "Semi")
     if mode=="Burst" then
         if not _tbHeld then
