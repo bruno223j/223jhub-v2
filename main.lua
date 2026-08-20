@@ -106,7 +106,6 @@ if _G._223HUB_Kill then pcall(_G._223HUB_Kill) end
 local _conns = {}
 local _resources = {}
 local _hubShutdown=false
-local _diag={}
 local function AC(c)
     if c then _conns[#_conns+1]=c end
     return c
@@ -126,23 +125,7 @@ local function CleanupResources()
     for resource in pairs(_resources) do ReleaseResource(resource) end
     _resources={}
 end
-local function DiagModule(name,status,err,elapsed)
-    _diag[name]={status=status or "unknown",error=err and tostring(err) or nil,lastUpdate=os.clock(),elapsed=elapsed or 0}
-end
-local function DiagError(name,err)
-    DiagModule(name,"error",err,0)
-end
-local function DiagSummary()
-    local out={}
-    for name,v in pairs(_diag) do
-        local err=v.error and " err="..tostring(v.error) or ""
-        out[#out+1]=name.."="..tostring(v.status).." ("..string.format("%.2fms",(v.elapsed or 0)*1000)..")"..err
-    end
-    table.sort(out)
-    local resourceCount=0; for _ in pairs(_resources) do resourceCount=resourceCount+1 end
-    out[#out+1]="connections="..tostring(#_conns).." resources="..tostring(resourceCount)
-    return #out>0 and table.concat(out," | ") or "No diagnostics recorded"
-end
+
 
 _G._223HUB_Kill = function()
     if _hubShutdown then return end
@@ -165,13 +148,13 @@ local Cfg = {
         Enabled=false, Box=false, Fill=false, Names=false,
         HP=false, Tracers=false, Dist=false, WallCheck=false,
         TeamCheck=false, HeldTool=false,
-        MaxDist=500, TrackList={}, AdaptivePerformance=false,
+                MaxDist=500,
         BoxColor=Color3.fromRGB(220,40,40), FillColor=Color3.fromRGB(220,40,40),
         NameColor=Color3.fromRGB(255,255,255), TracerColor=Color3.fromRGB(220,40,40),
         DistColor=Color3.fromRGB(200,200,200),
         HPBgColor=Color3.fromRGB(60,0,0), ToolColor=Color3.fromRGB(255,210,50),
         Skeleton=false, SkelColor=Color3.fromRGB(0,220,255), Mode="Default (Universal)",
-                UpdateRate=30, RadarEnabled=false, RadarTarget="", RadarHighlight=false, RadarColorName="Yellow", ESPColorName="Red",
+                UpdateRate=30, RadarEnabled=false, RadarTarget="", RadarTargets={}, RadarHighlight=false, RadarColorName="Yellow", ESPColorName="Red",
 
     },
     Aim = {
@@ -190,6 +173,7 @@ Trigger = { Enabled=false, TeamCheck=false, Delay=80, Mode="Semi",
     Misc = {
                 Fly=false, FlySpeed=50, FlyBoost=false,
         VehicleFly=false, VehicleFlySpeed=100,
+        Telekinesis=false, TelekinesisForce=1000, TelekinesisMode="Hold",
         Noclip=false,
 
         Speed=false, WalkSpeed=25, AntiAFK=false,
@@ -206,6 +190,7 @@ Trigger = { Enabled=false, TeamCheck=false, Delay=80, Mode="Semi",
         NoclipKey=Enum.KeyCode.F6,   NoclipKeyName="F6",
 SpeedKey=Enum.KeyCode.F7,    SpeedKeyName="F7",
         ClickTpKey=Enum.KeyCode.F8, ClickTpKeyName="F8",
+        TelekinesisKey=Enum.KeyCode.Y, TelekinesisKeyName="Y",
         ToggleKeyName="Mouse3",
         BlockGameInput=false, VSync=true,
         ThemePreset="Dark",
@@ -250,7 +235,7 @@ local function ValidateConfig(t)
         if t.Aim.AimKeyName~=nil and type(t.Aim.AimKeyName)~="string" then return false,"Aim.AimKeyName must be text" end
     end
     if t.Settings then
-        for _,key in ipairs({"ToggleKeyName","ESPKeyName","AimbotKeyName","FlyKeyName","NoclipKeyName","SpeedKeyName","ClickTpKeyName"}) do
+        for _,key in ipairs({"ToggleKeyName","ESPKeyName","AimbotKeyName","FlyKeyName","NoclipKeyName","SpeedKeyName","ClickTpKeyName","TelekinesisKeyName"}) do
             if t.Settings[key]~=nil and type(t.Settings[key])~="string" then return false,"Settings."..key.." must be text" end
         end
     end
@@ -258,9 +243,10 @@ local function ValidateConfig(t)
     return true
 end
 local SyncGuiFromCfg
+local SyncRadarSelectionVisual
 local function ApplySave(t)
     local valid,err=ValidateConfig(t)
-    if not valid then DiagError("Saves",err); return false,err end
+    if not valid then return false,err end
     if not t then return false,"Empty config" end
     local function mg(d,s) if not s then return end
         for k,v in pairs(s) do
@@ -271,6 +257,18 @@ local function ApplySave(t)
     mg(Cfg.ESP,t.ESP); mg(Cfg.Aim,t.Aim)
     mg(Cfg.Trigger,t.Trigger); mg(Cfg.Misc,t.Misc)
     mg(Cfg.Settings,t.Settings)
+    if type(Cfg.ESP.RadarTargets)~="table" then Cfg.ESP.RadarTargets={} end
+    if type(t.ESP)=="table" and type(t.ESP.RadarTarget)=="string" and t.ESP.RadarTarget~="" and next(Cfg.ESP.RadarTargets)==nil then
+        Cfg.ESP.RadarTargets[t.ESP.RadarTarget]=true
+    end
+    -- Compatibilidade com saves da versão anterior: Vehicle Fling -> Telecinese.
+    if type(t.Misc)=="table" then
+        if t.Misc.Telekinesis==nil and t.Misc.VehicleFling~=nil then Cfg.Misc.Telekinesis=t.Misc.VehicleFling end
+        if t.Misc.TelekinesisForce==nil and t.Misc.VehicleFlingForce~=nil then Cfg.Misc.TelekinesisForce=t.Misc.VehicleFlingForce end
+    end
+    if type(t.Settings)=="table" and t.Settings.TelekinesisKeyName==nil and t.Settings.VehicleFlingKeyName~=nil then
+        Cfg.Settings.TelekinesisKeyName=t.Settings.VehicleFlingKeyName
+    end
     -- Compatibilidade explícita com a seção nova de Personalization.
     -- Também aceita saves antigos que guardavam estes campos dentro de ESP/Aim/Settings.
     if type(t.Personalization)=="table" then
@@ -306,11 +304,11 @@ local function ApplySave(t)
     Cfg.Settings.FlyKey=TK(Cfg.Settings.FlyKeyName,KeepBind(Cfg.Settings.FlyKey,Enum.KeyCode.F5))
     Cfg.Settings.NoclipKey=TK(Cfg.Settings.NoclipKeyName,KeepBind(Cfg.Settings.NoclipKey,Enum.KeyCode.F6))
     Cfg.Settings.SpeedKey=TK(Cfg.Settings.SpeedKeyName,KeepBind(Cfg.Settings.SpeedKey,Enum.KeyCode.F7))
-    Cfg.Settings.ClickTpKey=TK(Cfg.Settings.ClickTpKeyName,KeepBind(Cfg.Settings.ClickTpKey,Enum.KeyCode.F8))
+        Cfg.Settings.ClickTpKey=TK(Cfg.Settings.ClickTpKeyName,KeepBind(Cfg.Settings.ClickTpKey,Enum.KeyCode.F8))
+    Cfg.Settings.TelekinesisKey=TK(Cfg.Settings.TelekinesisKeyName,KeepBind(Cfg.Settings.TelekinesisKey,Enum.KeyCode.Y))
     Cfg.ESP.UpdateRate=math.clamp(tonumber(Cfg.ESP.UpdateRate) or 30,1,60)
     _espInterval=1/Cfg.ESP.UpdateRate
     if SyncGuiFromCfg then pcall(SyncGuiFromCfg) end
-    DiagModule("Saves","ok",nil,0)
     return true
 end
 local function SaveCfg(name)
@@ -326,7 +324,7 @@ local function LoadCfg(name)
     if isfile and not isfile(fn) then return false,"No encontrado" end
     local ok,data=pcall(readfile,fn); if not ok then return false,"Erro" end
     local ok2,t=pcall(function() return HttpService:JSONDecode(data) end)
-    if not ok2 then DiagError("Saves","JSON invalido"); return false,"JSON invalido" end
+    if not ok2 then return false,"JSON invalido" end
     local applied,applyErr=ApplySave(t)
     if not applied then return false,applyErr end
     return true,fn
@@ -377,21 +375,29 @@ end
 
 local function GetBounds(char)
     if not char then return nil end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return nil end
-    local head   = char:FindFirstChild("Head")
-    local topPos = head and (head.Position + Vector3.new(0, head.Size.Y/2 + 0.1, 0))
-                        or  (hrp.Position + Vector3.new(0, 3.3, 0))
-    local botPos = hrp.Position - Vector3.new(0, 3.0, 0)
-    local tZ = (Cam:WorldToViewportPoint(topPos)).Z
-    local bZ = (Cam:WorldToViewportPoint(botPos)).Z
-    if tZ <= 0 and bZ <= 0 then return nil end
-    local topSP = W2S(topPos)
-    local botSP = W2S(botPos)
-    local h = math.abs(botSP.Y - topSP.Y)
-    if h < 3 then return nil end
-    local w = h * 0.6
-    return topSP.X - w/2, topSP.Y, w, h
+    local ok,boxCf,boxSize=pcall(function() return char:GetBoundingBox() end)
+    if not ok or not boxCf or not boxSize then return nil end
+    local hx,hy,hz=boxSize.X/2,boxSize.Y/2,boxSize.Z/2
+    local minX,minY=math.huge,math.huge
+    local maxX,maxY=-math.huge,-math.huge
+    local visibleCount=0
+    for _,corner in ipairs({
+        Vector3.new(-hx,-hy,-hz),Vector3.new(-hx,-hy,hz),
+        Vector3.new(-hx,hy,-hz),Vector3.new(-hx,hy,hz),
+        Vector3.new(hx,-hy,-hz),Vector3.new(hx,-hy,hz),
+        Vector3.new(hx,hy,-hz),Vector3.new(hx,hy,hz)
+    }) do
+        local screen=Cam:WorldToViewportPoint(boxCf:PointToWorldSpace(corner))
+        if screen.Z>0 then
+            visibleCount=visibleCount+1
+            minX=math.min(minX,screen.X); minY=math.min(minY,screen.Y)
+            maxX=math.max(maxX,screen.X); maxY=math.max(maxY,screen.Y)
+        end
+    end
+    if visibleCount==0 then return nil end
+    local width,height=maxX-minX,maxY-minY
+    if width<2 or height<3 then return nil end
+    return minX,minY,width,height
 end
 
 local function GetDist(char)
@@ -564,13 +570,13 @@ local function KillESP(p)
     local singles = {"Box","Fill","Name","Dist","HPBg","HPBar","Tracer","Tool"}
     for _,k in ipairs(singles) do
         if d[k] then
-            pcall(function() d[k].Visible=false; d[k]:Remove() end)
+            ReleaseResource(d[k])
             DrawPool[d[k]] = nil
         end
     end
     if d.Skel then
         for _,ln in ipairs(d.Skel) do
-            pcall(function() ln.Visible=false; ln:Remove() end)
+            ReleaseResource(ln)
             DrawPool[ln]=nil
         end
     end
@@ -586,9 +592,6 @@ local function HideESP(d)
     if d.Skel then for _,ln in ipairs(d.Skel) do SafeHide(ln) end end
 end
 
--- ============================================================
--- FOV CIRCLE
--- OTIMIZAO: s recalcula quando FOV, posio ou estado mudam
 -- ============================================================
 local FOV_SEGS = 48
 local _fovLines = {}
@@ -851,13 +854,13 @@ end))
 -- ============================================================
 -- ANTI AFK / ANTI RAGDOLL
 -- ============================================================
-LP.Idled:Connect(function()
+AC(LP.Idled:Connect(function()
     if not Cfg.Misc.AntiAFK then return end
     local vim=game:GetService("VirtualInputManager")
     pcall(function() vim:SendKeyEvent(true,Enum.KeyCode.ButtonL3,false,game) end)
     task.wait(0.5)
     pcall(function() vim:SendKeyEvent(false,Enum.KeyCode.ButtonL3,false,game) end)
-end)
+end))
 
 AC(RunService.Heartbeat:Connect(function()
     if not Cfg.Misc.AntiRag then return end
@@ -874,6 +877,7 @@ end))
 -- OTIMIZAO: reutiliza tabela pset em vez de criar por chamada
 -- ============================================================
 local _hbConns={}
+local _hbDescConns={}
 local _hbOriginals={}
 local HBP_ALL_NAMES={"Head","Torso","UpperTorso","LowerTorso","HumanoidRootPart","Left Arm","Right Arm","Left Leg","Right Leg","LeftUpperArm","RightUpperArm","LeftLowerArm","RightLowerArm","LeftHand","RightHand","LeftUpperLeg","RightUpperLeg","LeftLowerLeg","RightLowerLeg","LeftFoot","RightFoot"}
 local HBP_ALL_SET={}
@@ -909,10 +913,12 @@ end
 local function SetHitbox(p,on)
     if p==LP then return end
     if _hbConns[p] then _hbConns[p]:Disconnect(); _hbConns[p]=nil end
+    if _hbDescConns[p] then _hbDescConns[p]:Disconnect(); _hbDescConns[p]=nil end
     if not on then RestoreHitbox(p); return end
     RestoreHitbox(p)
     if p.Character then ApplyHBChar(p,p.Character) end
     _hbConns[p]=p.CharacterAdded:Connect(function(char)
+        if _hbDescConns[p] then _hbDescConns[p]:Disconnect(); _hbDescConns[p]=nil end
         RestoreHitbox(p)
         if not Cfg.Misc.HitboxExtender then return end
         task.spawn(function()
@@ -923,13 +929,13 @@ local function SetHitbox(p,on)
                 end
             end
         end)
-        pcall(function()
-            char.DescendantAdded:Connect(function(obj)
-                if Cfg.Misc.HitboxExtender and obj:IsA("BasePart") then
-                    task.defer(function() if p.Character==char then ApplyHBChar(p,char) end end)
-                end
+            pcall(function()
+                _hbDescConns[p]=char.DescendantAdded:Connect(function(obj)
+                    if Cfg.Misc.HitboxExtender and obj:IsA("BasePart") then
+                        task.defer(function() if p.Character==char then ApplyHBChar(p,char) end end)
+                    end
+                end)
             end)
-        end)
     end)
 end
 local function RefreshHitboxes()
@@ -985,7 +991,10 @@ end
 local function DestroyDeadlineESP(model)
     local d=DeadlineDrawings[model]
     if not d then return end
-    for _,v in pairs(d) do pcall(function() v:Remove() end) end
+    for _,v in pairs(d) do
+        ReleaseResource(v)
+        DrawPool[v]=nil
+    end
     DeadlineDrawings[model]=nil
 end
 local function UpdateDeadlineESP()
@@ -1006,7 +1015,7 @@ local function UpdateDeadlineESP()
             local rootPos,onScreen=Cam:WorldToViewportPoint(root.Position)
             local player=DeadlinePlayer(model)
             local radarFilter=Cfg.ESP.RadarEnabled and not Cfg.ESP.RadarHighlight
-            local radarAllowed=not radarFilter or Cfg.ESP.RadarTarget=="" or (player and player.Name==Cfg.ESP.RadarTarget) or model.Name==Cfg.ESP.RadarTarget
+            local radarAllowed=not radarFilter or next(Cfg.ESP.RadarTargets)==nil or (player and Cfg.ESP.RadarTargets[player.Name]) or Cfg.ESP.RadarTargets[model.Name]
             local allowed=(not Cfg.ESP.TeamCheck or not player or not SameTeam(player)) and radarAllowed
             local dist=localPos and (root.Position-localPos).Magnitude or 0
             local visible=not Cfg.ESP.WallCheck or DeadlineVisible(model,root)
@@ -1019,7 +1028,7 @@ local function UpdateDeadlineESP()
                 local boxHeight=math.abs(topPos.Y-bottomPos.Y)
                 local boxWidth=boxHeight*0.6
                 local boxPos=Vector2.new(rootPos.X-boxWidth/2,math.min(topPos.Y,bottomPos.Y))
-                local radarFocus=Cfg.ESP.RadarHighlight and Cfg.ESP.RadarTarget~="" and player and player.Name==Cfg.ESP.RadarTarget
+                local radarFocus=Cfg.ESP.RadarHighlight and next(Cfg.ESP.RadarTargets)~=nil and player and Cfg.ESP.RadarTargets[player.Name]
                 local radarColor=FOVColors[Cfg.ESP.RadarColorName] or FOVColors.Yellow
                 if Cfg.ESP.Box then SafeSet(d.Box,{Size=Vector2.new(boxWidth,boxHeight),Position=boxPos,Color=radarFocus and radarColor or Color3.fromRGB(0,255,255),Visible=true}) else SafeHide(d.Box) end
                 if Cfg.ESP.Names then SafeSet(d.Name,{Text=model.Name.." ["..math.floor(dist).."m]",Position=Vector2.new(rootPos.X,boxPos.Y-20),Color=radarFocus and radarColor or Color3.fromRGB(255,255,100),Visible=true}) else SafeHide(d.Name) end
@@ -1050,13 +1059,11 @@ end
 -- ============================================================
 local _aimLockedTarget=nil
 AC(RunService.RenderStepped:Connect(function(dt)
-    local frameStart=os.clock()
+    _visFrameStamp=_visFrameStamp+1
     local vs=Cam.ViewportSize
     local cx,cy=vs.X/2,vs.Y/2
     UpdateFOVCircle()
-    DiagModule("FOV",Cfg.Aim.ShowFOV and "active" or "idle",nil,os.clock()-frameStart)
 
-    local aimStart=os.clock()
     local aimTargeted=false
     local aimHeld=IsBindHeldNow(Cfg.Aim.AimKey)
     if Cfg.Aim.AimKey=="ScrollUp" or Cfg.Aim.AimKey=="ScrollDown" then
@@ -1088,24 +1095,16 @@ AC(RunService.RenderStepped:Connect(function(dt)
         _aimLockedTarget=nil
     end
     if not Cfg.Aim.CameraFollow or not aimHeld then _aimLockedTarget=nil end
-    DiagModule("Aimbot",not Cfg.Aim.Aimbot and "disabled" or (aimTargeted and "active" or "idle"),nil,os.clock()-aimStart)
 
-    local espStart=os.clock()
     if not Cfg.ESP.Enabled then
-        DiagModule("ESP","disabled",nil,os.clock()-espStart)
         for _,d in pairs(ESPO) do HideESP(d) end
         for _,d in pairs(DeadlineDrawings) do HideDeadlineESP(d) end
         return
     end
     local now=os.clock()
     local syncInterval=Cfg.Settings.VSync and math.max(tonumber(dt) or 1/60,1/240) or _espInterval
-    if Cfg.ESP.AdaptivePerformance then
-        local playerCount=#Players:GetPlayers()
-        if playerCount<=1 then syncInterval=math.max(syncInterval,0.35) end
-        if not _hubMenuOpen then syncInterval=math.max(syncInterval,1/20) end
-    end
+    
     if now-_espLastUpdate<syncInterval then
-        DiagModule("ESP","waiting",nil,os.clock()-espStart)
         return
     end
     _espLastUpdate=now
@@ -1113,7 +1112,6 @@ AC(RunService.RenderStepped:Connect(function(dt)
     if Cfg.ESP.Mode=="Deadline" then
         for _,d in pairs(ESPO) do HideESP(d) end
         UpdateDeadlineESP()
-        DiagModule("ESP","active",nil,os.clock()-espStart)
         return
     else
         for _,d in pairs(DeadlineDrawings) do HideDeadlineESP(d) end
@@ -1129,15 +1127,14 @@ AC(RunService.RenderStepped:Connect(function(dt)
         local bx,by,bw,bh=GetBounds(char)
         local visible=(not Cfg.ESP.WallCheck) or IsVisibleCached(player,char)
         local radarFilter=Cfg.ESP.RadarEnabled and not Cfg.ESP.RadarHighlight
-        local radarAllowed=not radarFilter or Cfg.ESP.RadarTarget=="" or player.Name==Cfg.ESP.RadarTarget
+        local radarAllowed=not radarFilter or next(Cfg.ESP.RadarTargets)==nil or Cfg.ESP.RadarTargets[player.Name]
         local allowed=(not Cfg.ESP.TeamCheck or not SameTeam(player))
-            and (not next(Cfg.ESP.TrackList) or Cfg.ESP.TrackList[player.Name])
             and radarAllowed
         local show=dist<=Cfg.ESP.MaxDist and visible and allowed and bx~=nil
 
         if show then
             local x,y,w,h=bx,by,bw,bh
-            local radarFocus=Cfg.ESP.RadarHighlight and Cfg.ESP.RadarTarget~="" and player and player.Name==Cfg.ESP.RadarTarget
+            local radarFocus=Cfg.ESP.RadarHighlight and next(Cfg.ESP.RadarTargets)~=nil and player and Cfg.ESP.RadarTargets[player.Name]
             local radarColor=FOVColors[Cfg.ESP.RadarColorName] or FOVColors.Yellow
             local boxColor=radarFocus and radarColor or Cfg.ESP.BoxColor
             local nameColor=radarFocus and radarColor or Cfg.ESP.NameColor
@@ -1164,7 +1161,7 @@ AC(RunService.RenderStepped:Connect(function(dt)
                         local p1=char:FindFirstChild(pair[1]); local p2=char:FindFirstChild(pair[2])
                         if p1 and p2 then
                             local s1,o1=W2S(p1.Position); local s2,o2=W2S(p2.Position)
-                            if o1 and o2 then SafeSet(ln,{From=s1,To=s2,Color=Cfg.ESP.SkelColor,Visible=true}) else SafeHide(ln) end
+                            if o1 and o2 then SafeSet(ln,{From=s1,To=s2,Color=radarFocus and radarColor or Cfg.ESP.SkelColor,Visible=true}) else SafeHide(ln) end
                         else SafeHide(ln) end
                     elseif ln then SafeHide(ln) end
                 end
@@ -1173,7 +1170,6 @@ AC(RunService.RenderStepped:Connect(function(dt)
             HideESP(d)
         end
     end
-    DiagModule("ESP","active",nil,os.clock()-espStart)
 end))
 
 for _,p in ipairs(Players:GetPlayers()) do MakeESP(p) end
@@ -1182,7 +1178,7 @@ AC(Players.PlayerAdded:Connect(function(p)
     if Cfg.Misc.HitboxExtender then SetHitbox(p,true) end
 end))
 AC(Players.PlayerRemoving:Connect(function(p)
-    KillESP(p); SetHitbox(p,false); _hbConns[p]=nil; _hbOriginals[p]=nil
+    KillESP(p); SetHitbox(p,false); _hbConns[p]=nil; _hbDescConns[p]=nil; _hbOriginals[p]=nil
 end))
 AC(LP.CharacterAdded:Connect(function()
     task.wait(0.5)
@@ -1196,7 +1192,9 @@ end))
 -- CLICK TELEPORT
 -- Uses the current mouse hit position only while the toggle is enabled.
 -- ============================================================
+local _TK
 AC(UIS.InputBegan:Connect(function(input,gameProcessed)
+    if _TK and _TK.Held then return end
     if gameProcessed or not Cfg.Misc.ClickTp then return end
     if input.UserInputType~=Enum.UserInputType.MouseButton1 then return end
     local char=LP.Character
@@ -1227,18 +1225,85 @@ local function RefreshTeleportPlayers()
         pcall(function() teleportPlayerDropdown:SetValues(teleportPlayerNames) end)
     end
 end
+local function FindTeleportCharacter(player)
+    if not player or player==LP then return nil end
+    local char=player.Character
+    if char and char.Parent then return char end
+    for _,obj in ipairs(Workspace:GetDescendants()) do
+        if obj:IsA("Model") and obj.Name==player.Name and obj:FindFirstChildOfClass("Humanoid") then return obj end
+    end
+    return nil
+end
+local function GetTeleportPivot(model)
+    if not model then return nil end
+    local ok,pivot=pcall(function() return model:GetPivot() end)
+    if ok and pivot then return pivot end
+    local root=model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart",true)
+    return root and root.CFrame or nil
+end
+local function MoveCharacterTo(character,targetCFrame)
+    if not character or not targetCFrame then return false end
+    local before=GetTeleportPivot(character)
+    local ok=pcall(function() character:PivotTo(targetCFrame) end)
+    local root=character:FindFirstChild("HumanoidRootPart") or character.PrimaryPart or character:FindFirstChildWhichIsA("BasePart",true)
+    if root then
+        pcall(function() root.CFrame=targetCFrame; root.AssemblyLinearVelocity=Vector3.zero; root.AssemblyAngularVelocity=Vector3.zero end)
+        ok=true
+    end
+    if not ok and before then
+        local delta=targetCFrame*before:Inverse()
+        pcall(function()
+            for _,obj in ipairs(character:GetDescendants()) do
+                if obj:IsA("BasePart") then obj.CFrame=delta*obj.CFrame end
+            end
+        end)
+        ok=true
+    end
+    return ok
+end
 local function TeleportToSelectedPlayer()
     local targetName=teleportPlayerMap[teleportPlayerSelected] or teleportPlayerSelected
     local target=targetName and Players:FindFirstChild(targetName)
-    local targetChar=target and target.Character
-    local targetRoot=targetChar and targetChar:FindFirstChild("HumanoidRootPart")
     local char=LP.Character
-    local root=char and char:FindFirstChild("HumanoidRootPart")
-    if not root or not targetRoot or target==LP then
+    if not target or target==LP or not char then
         Fluent:Notify({Title="Teleport",Content="Carregue os jogadores e selecione um alvo válido.",Duration=2})
         return
     end
-    root.CFrame=CFrame.new(targetRoot.Position+Vector3.new(0,3,0))
+    local targetChar=FindTeleportCharacter(target)
+    if not targetChar then
+        Fluent:Notify({Title="Teleport",Content="Aguardando o personagem do alvo carregar.",Duration=2})
+        task.spawn(function()
+            for _=1,20 do
+                task.wait(0.15)
+                targetChar=FindTeleportCharacter(target)
+                if targetChar then break end
+            end
+            local delayedPivot=GetTeleportPivot(targetChar)
+            local delayedOwn=GetTeleportPivot(char)
+            if targetChar and delayedPivot and delayedOwn and target.Parent and char.Parent then
+                MoveCharacterTo(char,CFrame.new(delayedPivot.Position+Vector3.new(0,3,0))*delayedPivot.Rotation)
+            end
+        end)
+        return
+    end
+    local targetPivot=GetTeleportPivot(targetChar)
+    local ownPivot=GetTeleportPivot(char)
+    if not targetPivot or not ownPivot then
+        Fluent:Notify({Title="Teleport",Content="O personagem do alvo ainda não terminou de carregar.",Duration=2})
+        return
+    end
+    local destination=CFrame.new(targetPivot.Position+Vector3.new(0,3,0))*targetPivot.Rotation
+    local moved=MoveCharacterTo(char,destination)
+    task.spawn(function()
+        for _,delayTime in ipairs({0.15,0.45,1.0}) do
+            task.wait(delayTime)
+            if target.Parent and char.Parent then
+                local refreshed=GetTeleportPivot(FindTeleportCharacter(target))
+                if refreshed then MoveCharacterTo(char,CFrame.new(refreshed.Position+Vector3.new(0,3,0))*refreshed.Rotation) end
+            end
+        end
+    end)
+    if not moved then Fluent:Notify({Title="Teleport",Content="O jogo bloqueou o reposicionamento do personagem.",Duration=2}) end
 end
 
 -- ============================================================
@@ -1288,17 +1353,14 @@ local function GetMapTools()
     return out
 end
 
-local function GrabNearestTool()
-    local list=GetMapTools()
-    local first=list[1]
-    if first then return _TryGrab(first.tool) and first.name or nil end
-    return nil
-end
+
 
 -- ============================================================
 -- KEYBINDS
 -- ============================================================
 
+_TK={Held=nil,HoldConn=nil}
+local _tkLastAction=0
 _G._scrollAimPulse=false
 local M3,M4,M5
 pcall(function() M3=Enum.UserInputType.MouseButton3; M4=Enum.UserInputType.MouseButton4; M5=Enum.UserInputType.MouseButton5 end)
@@ -1332,6 +1394,12 @@ AC(UIS.InputBegan:Connect(function(inp,gp)
     local isMouseInput=(inputAlias~=nil or inp.UserInputType==Enum.UserInputType.MouseButton1 or inp.UserInputType==Enum.UserInputType.MouseButton2)
     if gp and not isMouseInput then return end
     if inp.UserInputType==Enum.UserInputType.MouseWheel and (inp.Position.Z>0 and Cfg.Aim.AimKey=="ScrollUp" or inp.Position.Z<0 and Cfg.Aim.AimKey=="ScrollDown") then _G._scrollAimPulse=true end
+    if inp.UserInputType==Enum.UserInputType.MouseButton1 and _TK.Held then
+        if not gp and _TK.ThrowHeld then
+            _TK.ThrowHeld()
+        end
+        return
+    end
     if BindMatches(inp,Cfg.Settings.ToggleKey) then if _G._223HUB_ToggleMenu then _G._223HUB_ToggleMenu() end
     elseif BindMatches(inp,Cfg.Settings.ESPKey) then Cfg.ESP.Enabled=not Cfg.ESP.Enabled; TR("ESP")
     elseif BindMatches(inp,Cfg.Settings.AimbotKey) then Cfg.Aim.Aimbot=not Cfg.Aim.Aimbot; TR("Aim")
@@ -1339,6 +1407,8 @@ AC(UIS.InputBegan:Connect(function(inp,gp)
     elseif BindMatches(inp,Cfg.Settings.NoclipKey) then Cfg.Misc.Noclip=not Cfg.Misc.Noclip; if Cfg.Misc.Noclip then EnableNoclip() else DisableNoclip() end; TR("NC")
     elseif BindMatches(inp,Cfg.Settings.SpeedKey) then Cfg.Misc.Speed=not Cfg.Misc.Speed; ApplySpeed(); TR("Speed")
     elseif BindMatches(inp,Cfg.Settings.ClickTpKey) then Cfg.Misc.ClickTp=not Cfg.Misc.ClickTp; TR("Click TP")
+    elseif BindMatches(inp,Cfg.Settings.TelekinesisKey) then
+        if Cfg.Misc.Telekinesis and _TK.Action then _TK.Action() end
     end
 end))
 
@@ -1357,6 +1427,162 @@ Fluent.Notify=function(self,data,...)
     if type(data)=="table" and data.Title=="Interface" and data.Content=="Press RightShift to toggle the interface." then return end
     return _fluentNotify(self,data,...)
 end
+
+-- ============================================================
+-- TELECINESE
+-- Por padrão, a tecla pega o alvo e o clique esquerdo o lança.
+-- O modo Direct mantém o comportamento antigo de arremesso imediato.
+-- ============================================================
+_TK.FindVehicle=function(part)
+    if not part or not part:IsA("BasePart") then return nil end
+    local node=part
+    while node and node~=Workspace do
+        if node:IsA("Model") then
+            local seat=node:FindFirstChildWhichIsA("VehicleSeat",true) or node:FindFirstChildWhichIsA("Seat",true)
+            if seat then return node end
+        end
+        node=node.Parent
+    end
+    return nil
+end
+_TK.EnableSimulationRadius=function()
+    pcall(function()
+        if sethiddenproperty then
+            sethiddenproperty(LP,"SimulationRadius",math.huge)
+            sethiddenproperty(LP,"MaxSimulationRadius",math.huge)
+        end
+    end)
+end
+_TK.VehicleRoot=function(model)
+    if not model then return nil end
+    local seat=model:FindFirstChildWhichIsA("VehicleSeat",true) or model:FindFirstChildWhichIsA("Seat",true)
+    local root=seat and seat.AssemblyRootPart
+    if root and root:IsA("BasePart") and not root.Anchored then return root end
+    if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") and not model.PrimaryPart.Anchored then return model.PrimaryPart.AssemblyRootPart or model.PrimaryPart end
+    for _,obj in ipairs(model:GetDescendants()) do
+        if obj:IsA("BasePart") and not obj.Anchored then
+            local assembly=obj.AssemblyRootPart
+            if assembly and assembly:IsA("BasePart") and not assembly.Anchored then return assembly end
+        end
+    end
+    return nil
+end
+_TK.HoldPosition=function()
+    local char=LP.Character
+    local root=char and char:FindFirstChild("HumanoidRootPart")
+    return root and root.Position+Vector3.new(0,8,0) or nil
+end
+_TK.Direction=function()
+    local direction=Cam.CFrame.LookVector+Vector3.new(0,0.35,0)
+    if direction.Magnitude<0.001 then direction=Vector3.new(0,1,0) end
+    return direction.Unit
+end
+_TK.Impulse=function(root,model)
+    if not root or not root.Parent or root.Anchored then return false end
+    _TK.EnableSimulationRadius()
+    local force=math.clamp(tonumber(Cfg.Misc.TelekinesisForce) or 1000,100,3000)
+    local direction=_TK.Direction()
+    local mass=math.clamp(tonumber(root.AssemblyMass) or 1,1,1000000)
+    return pcall(function()
+        root:ApplyImpulse(direction*mass*force)
+        root.AssemblyLinearVelocity=direction*force
+        root.AssemblyAngularVelocity=Cam.CFrame.RightVector*math.clamp(force*0.15,20,450)
+        if model then
+            for _,obj in ipairs(model:GetDescendants()) do
+                if obj:IsA("BasePart") and not obj.Anchored and obj~=root then
+                    obj.AssemblyLinearVelocity=direction*force
+                end
+            end
+        end
+    end)
+end
+_TK.Release=function()
+    if _TK.HoldConn then _TK.HoldConn:Disconnect(); _TK.HoldConn=nil end
+    local held=_TK.Held
+    _TK.Held=nil
+    if held then
+        if held.bodyPosition then pcall(function() held.bodyPosition:Destroy() end) end
+        if held.bodyGyro then pcall(function() held.bodyGyro:Destroy() end) end
+    end
+end
+_TK.Hold=function(kind,model,root)
+    _TK.Release()
+    _TK.EnableSimulationRadius()
+    if not root or not root.Parent then return false end
+    local bodyPosition=Instance.new("BodyPosition")
+    bodyPosition.Name="223TelekinesisHold"
+    bodyPosition.MaxForce=Vector3.new(1e9,1e9,1e9)
+    bodyPosition.P=50000; bodyPosition.D=1500
+    bodyPosition.Position=_TK.HoldPosition() or root.Position
+    bodyPosition.Parent=root
+    local bodyGyro=Instance.new("BodyGyro")
+    bodyGyro.Name="223TelekinesisRotation"
+    bodyGyro.MaxTorque=Vector3.new(1e9,1e9,1e9)
+    bodyGyro.P=30000; bodyGyro.D=1000
+    bodyGyro.CFrame=CFrame.lookAt(bodyPosition.Position,bodyPosition.Position+Cam.CFrame.LookVector)
+    bodyGyro.Parent=root
+    _TK.Held={kind=kind,model=model,root=root,bodyPosition=bodyPosition,bodyGyro=bodyGyro}
+    _TK.HoldConn=AC(RunService.RenderStepped:Connect(function()
+        local held=_TK.Held
+        local holdPosition=_TK.HoldPosition()
+        if not held or not holdPosition or not held.root or not held.root.Parent or held.root.Anchored or (held.model and not held.model.Parent) then _TK.Release(); return end
+        pcall(function()
+            local holdCFrame=CFrame.lookAt(holdPosition,holdPosition+Cam.CFrame.LookVector)
+            held.bodyPosition.Position=holdPosition
+            held.bodyGyro.CFrame=holdCFrame
+            held.root.CFrame=holdCFrame
+            if held.model then pcall(function() held.model:PivotTo(holdCFrame) end) end
+            held.root.AssemblyLinearVelocity=Vector3.zero
+            held.root.AssemblyAngularVelocity=Vector3.zero
+        end)
+    end))
+    return true
+end
+_TK.FindTarget=function()
+    local target=Mouse.Target
+    local vehicle=_TK.FindVehicle(target)
+    if vehicle then
+        local root=_TK.VehicleRoot(vehicle)
+        if root then return "Vehicle",vehicle,root end
+    end
+    return nil
+end
+_TK.ThrowCursor=function()
+    local _,model,root=_TK.FindTarget()
+    if not root then
+        Fluent:Notify({Title="Telecinese",Content="Aponte o cursor para um veículo antes de usar a tecla.",Duration=2})
+        return
+    end
+    local ok=_TK.Impulse(root,model)
+    if ok then Fluent:Notify({Title="Telecinese",Content="Veículo arremessado.",Duration=2}) end
+end
+_TK.ThrowHeld=function()
+    local held=_TK.Held
+    if not held or not held.root then return end
+    local root=held.root
+    _TK.Release()
+    if _TK.Impulse(root,held.model) then Fluent:Notify({Title="Telecinese",Content="Veículo lançado.",Duration=2}) end
+end
+_TK.Action=function()
+    local now=os.clock()
+    if now-_tkLastAction<0.18 then return end
+    _tkLastAction=now
+    if _TK.Held then
+        Fluent:Notify({Title="Telecinese",Content="Clique com o botão esquerdo para lançar o alvo segurado.",Duration=2})
+        return
+    end
+    if Cfg.Misc.TelekinesisMode=="Direct" then _TK.ThrowCursor(); return end
+    local _,model,root=_TK.FindTarget()
+    if not root then
+        Fluent:Notify({Title="Telecinese",Content="Aponte o cursor para um veículo antes de segurar.",Duration=2})
+        return
+    end
+    if _TK.Hold("Vehicle",model,root) then Fluent:Notify({Title="Telecinese",Content="Veículo segurado acima de você. Clique para lançar.",Duration=2}) end
+end
+AC(LP.CharacterRemoving:Connect(function()
+    _TK.Release()
+end))
+
 local function RemoveInterfaceHint()
     local cg=game:GetService("CoreGui")
     for _,obj in ipairs(cg:GetDescendants()) do
@@ -1415,6 +1641,7 @@ local Tabs={
     Visuals=Window:AddTab({Title="Visuals",Icon="eye"}),
     Radar=Window:AddTab({Title="Radar",Icon="scan-line"}),
     Misc=Window:AddTab({Title="Misc",Icon="settings-2"}),
+    Destruction=Window:AddTab({Title="zaralho",Icon="bomb"}),
     Spawn=Window:AddTab({Title="Spawn",Icon="package"}),
     Binds=Window:AddTab({Title="Binds",Icon="keyboard"}),
     Saves=Window:AddTab({Title="Saves",Icon="save"}),
@@ -1424,9 +1651,9 @@ local Tabs={
 }
 local Options=Fluent.Options
 Tabs.Home:AddSection("223JHUB 3.0")
-Tabs.Home:AddParagraph({Title="Bem-vindo ao 223JHUB 3.0",Content="Nova geração com temas ampliados, paletas de cores, TriggerBot Semi/Burst/One-Shot, desempenho adaptativo e melhorias de estabilidade."})
+Tabs.Home:AddParagraph({Title="Bem-vindo ao 223JHUB 3.0",Content="Nova geração com temas ampliados, paletas de cores, TriggerBot Semi/Burst/One-Shot e melhorias de estabilidade."})
 Tabs.Home:AddParagraph({Title="Creditos",Content="Criado por Bruno223j e TY | Revolutionari'us Group"})
-Tabs.Home:AddParagraph({Title="Atualizacao",Content="Versao 3.0 com temas ampliados, novas paletas de cores, TriggerBot Semi/Burst/One-Shot, desempenho adaptativo e melhorias de estabilidade."})
+Tabs.Home:AddParagraph({Title="Atualizacao",Content="Versao 3.0 com temas ampliados, novas paletas de cores, TriggerBot Semi/Burst/One-Shot e melhorias de estabilidade."})
 Tabs.Home:AddParagraph({Title="Estado",Content="As listas de jogadores e ferramentas s?o carregadas somente quando voc? solicita."})
 Tabs.Home:AddParagraph({Title="Novidades",Content="Camera Follow mantém o alvo acompanhado fora do FOV; Aimbot Distance limita a distância máxima; Radar Highlight destaca um alvo específico no ESP; a aba Personalização reúne temas e cores ampliadas."})
 Tabs.Home:AddParagraph({Title="Interface",Content="Dropdowns são tratados como menus expansíveis e as binds carregadas pelos saves são reaplicadas visualmente na GUI."})
@@ -1448,7 +1675,7 @@ end
 local function FindBindConflicts()
     local entries={
         {"Menu",Cfg.Settings.ToggleKey},{"ESP",Cfg.Settings.ESPKey},{"Aimbot Toggle",Cfg.Settings.AimbotKey},
-        {"Fly",Cfg.Settings.FlyKey},{"Noclip",Cfg.Settings.NoclipKey},{"Speed",Cfg.Settings.SpeedKey},{"Click Teleport",Cfg.Settings.ClickTpKey},{"Aim Lock",Cfg.Aim.AimKey}
+        {"Fly",Cfg.Settings.FlyKey},{"Noclip",Cfg.Settings.NoclipKey},{"Speed",Cfg.Settings.SpeedKey},{"Click Teleport",Cfg.Settings.ClickTpKey},{"Telecinese",Cfg.Settings.TelekinesisKey},{"Aim Lock",Cfg.Aim.AimKey}
     }
     local seen={}; local conflicts={}
     for _,entry in ipairs(entries) do
@@ -1521,6 +1748,21 @@ local function BindButton(tab,title,getName,setBind)
     _bindButtons[title]=entry
     return button
 end
+
+Tabs.Destruction:AddSection("Telecinese")
+Tabs.Destruction:AddParagraph({Title="Controle de veículos",Content="No modo Hold, pressione a tecla configurada para segurar o veículo apontado. Clique com o botão esquerdo para arremessá-lo. No modo Direct, a tecla arremessa imediatamente."})
+T(Tabs.Destruction,"Telekinesis","Enable Telecinese",function() return Cfg.Misc.Telekinesis end,function(v)
+    Cfg.Misc.Telekinesis=v
+    if not v then _TK.Release() end
+end)
+Tabs.Destruction:AddDropdown("TelekinesisMode",{Title="Telecinese Mode",Values={"Hold","Direct"},Multi=false,Default=Cfg.Misc.TelekinesisMode or "Hold",Callback=function(v)
+    Cfg.Misc.TelekinesisMode=v
+    if v=="Direct" then _TK.Release() end
+end})
+S(Tabs.Destruction,"TelekinesisForce","Telecinese Force",100,3000,1000,function(v) Cfg.Misc.TelekinesisForce=math.clamp(tonumber(v) or 1000,100,3000) end)
+BindButton(Tabs.Destruction,"Telecinese Key",function() return Cfg.Settings.TelekinesisKeyName end,function(k,n) Cfg.Settings.TelekinesisKey=k; Cfg.Settings.TelekinesisKeyName=n end)
+Tabs.Destruction:AddButton({Title="Release Held Target",Callback=function() _TK.Release() end})
+
 Tabs.Combat:AddSection("Aimbot")
 T(Tabs.Combat,"Aimbot","Enable Aimbot",function() return Cfg.Aim.Aimbot end,function(v) Cfg.Aim.Aimbot=v end)
 
@@ -1621,7 +1863,7 @@ T(Tabs.Visuals,"TeamCheck","Team Check",function() return Cfg.ESP.TeamCheck end,
 T(Tabs.Visuals,"Skeleton","Skeleton",function() return Cfg.ESP.Skeleton end,function(v) Cfg.ESP.Skeleton=v end)
 S(Tabs.Visuals,"MaxDistance","Max Distance",50,10000,500,function(v) Cfg.ESP.MaxDist=v end)
 S(Tabs.Visuals,"ESPUpdateRate","ESP Update Rate (FPS)",1,60,30,function(v) Cfg.ESP.UpdateRate=v; _espInterval=1/math.max(v,1) end)
-T(Tabs.Visuals,"AdaptivePerformance","Atualização adaptativa",function() return Cfg.ESP.AdaptivePerformance end,function(v) Cfg.ESP.AdaptivePerformance=v end)
+
 T(Tabs.Visuals,"HeldTool","Show Item in Hand",function() return Cfg.ESP.HeldTool end,function(v) Cfg.ESP.HeldTool=v end)
 
 Tabs.Misc:AddSection("Movement")
@@ -1670,7 +1912,7 @@ Tabs.Spawn:AddButton({Title="Load Tools",Callback=function() RefreshFluentTools(
 Tabs.Spawn:AddButton({Title="Spawn Selected Tool",Callback=function()
     if selectedTool then _TryGrab(selectedTool.tool) end
 end})
-Tabs.Spawn:AddButton({Title="Grab Nearest Tool",Callback=function() GrabNearestTool() end})
+
 local inventoryToolNames={"Press Refresh Inventory"}
 local selectedInventoryTool=nil
 local function RefreshInventoryTools()
@@ -1755,10 +1997,11 @@ SyncGuiFromCfg=function()
         HeldTool=Cfg.ESP.HeldTool, Aimbot=Cfg.Aim.Aimbot, ShowFOV=Cfg.Aim.ShowFOV,
         UseFOV=Cfg.Aim.UseFOV, CameraFollow=Cfg.Aim.CameraFollow, Trigger=Cfg.Trigger.Enabled, TriggerTeam=Cfg.Trigger.TeamCheck,
         Hitbox=Cfg.Misc.HitboxExtender, HitboxTeamCheck=Cfg.Misc.TeamCheck,
-        Fly=Cfg.Misc.Fly, VehicleFly=Cfg.Misc.VehicleFly, Noclip=Cfg.Misc.Noclip, Speed=Cfg.Misc.Speed,
+        Fly=Cfg.Misc.Fly, VehicleFly=Cfg.Misc.VehicleFly, Telekinesis=Cfg.Misc.Telekinesis, Noclip=Cfg.Misc.Noclip, Speed=Cfg.Misc.Speed,
         AntiRag=Cfg.Misc.AntiRag, ClickTP=Cfg.Misc.ClickTp,
         AntiAFK=Cfg.Misc.AntiAFK, BlockGameInput=Cfg.Settings.BlockGameInput,
-        VSync=Cfg.Settings.VSync, AdaptivePerformance=Cfg.ESP.AdaptivePerformance,
+                VSync=Cfg.Settings.VSync,
+
     }
     ApplyLoadedPersonalization()
     for id,value in pairs(toggles) do set(id,value) end
@@ -1766,7 +2009,8 @@ SyncGuiFromCfg=function()
         PredStrength=Cfg.Aim.PredStr, Smooth=Cfg.Aim.Smoothness, AimStrength=Cfg.Aim.AimStrength,
         FOVSize=Cfg.Aim.FOV, AimMaxDistance=Cfg.Aim.MaxDistance, TriggerDelay=Cfg.Trigger.Delay,
         HitboxSize=Cfg.Misc.HitboxSize, MaxDistance=Cfg.ESP.MaxDist,
-        ESPUpdateRate=Cfg.ESP.UpdateRate, FlySpeed=Cfg.Misc.FlySpeed, VehicleFlySpeed=Cfg.Misc.VehicleFlySpeed,
+                ESPUpdateRate=Cfg.ESP.UpdateRate, FlySpeed=Cfg.Misc.FlySpeed, VehicleFlySpeed=Cfg.Misc.VehicleFlySpeed,
+        TelekinesisForce=Cfg.Misc.TelekinesisForce,
         
         WindowWidth=Cfg.Settings.WindowWidth, WindowHeight=Cfg.Settings.WindowHeight,
                 WalkSpeed=Cfg.Misc.WalkSpeed,
@@ -1774,8 +2018,10 @@ SyncGuiFromCfg=function()
     }
     for id,value in pairs(sliders) do set(id,value) end
     set("AimPart",Cfg.Aim.AimPart); set("TriggerMode",Cfg.Trigger.Mode or "Semi")
+    set("TelekinesisMode",Cfg.Misc.TelekinesisMode or "Hold")
     set("FocusPriority",Cfg.Aim.FocusPriority)
     set("ESPMode",Cfg.ESP.Mode); set("ESPColor",Cfg.ESP.ESPColorName or "Red"); set("FOVColor",Cfg.Aim.FOVColorName); set("RadarColor",Cfg.ESP.RadarColorName)
+    if SyncRadarSelectionVisual then task.defer(function() pcall(SyncRadarSelectionVisual) end) end
     if _customSelectors.ThemePreset then _customSelectors.ThemePreset.SetValue(Cfg.Settings.ThemePreset or "Dark") end
     if _customSelectors.ESPColor then _customSelectors.ESPColor.SetValue(Cfg.ESP.ESPColorName or "Red") end
     if _customSelectors.FOVColor then _customSelectors.FOVColor.SetValue(Cfg.Aim.FOVColorName or "Red") end
@@ -1839,7 +2085,7 @@ Tabs.Saves:AddInput("ImportJson",{Title="JSON to import",Placeholder="Cole o JSO
 Tabs.Saves:AddButton({Title="Import JSON",Callback=function()
     local raw=Options.ImportJson and Options.ImportJson.Value or ""
     local ok,data=pcall(function() return HttpService:JSONDecode(raw) end)
-    if not ok then DiagError("Saves","JSON invalido"); Fluent:Notify({Title="Saves",Content="JSON invalido.",Duration=2}); return end
+    if not ok then Fluent:Notify({Title="Saves",Content="JSON invalido.",Duration=2}); return end
     local applied,err=ApplySave(data)
     if applied then SyncGuiAfterLoad(); Fluent:Notify({Title="Saves",Content="JSON importado.",Duration=2}) else Fluent:Notify({Title="Saves",Content=tostring(err),Duration=3}) end
 end})
@@ -1848,29 +2094,72 @@ Tabs.Saves:AddButton({Title="Export JSON",Callback=function()
     if setclipboard then pcall(setclipboard,raw); Fluent:Notify({Title="Saves",Content="JSON copiado para a area de transfer?ncia.",Duration=2}) else Fluent:Notify({Title="Saves",Content="setclipboard indisponivel.",Duration=2}) end
 end})
 
--- Radar: lista carregada manualmente e um alvo por vez.
-local radarNames={"Press Load Players"}; local radarSelected=nil; local radarMap={}
+-- Radar: lista carregada manualmente e vários alvos simultâneos.
+local radarNames={"Press Load Players"}; local radarSelected={}; local radarMap={}
 local function RefreshRadarList()
     radarNames={}; radarMap={}
+    if type(Cfg.ESP.RadarTargets)~="table" then Cfg.ESP.RadarTargets={} end
     for _,p in ipairs(Players:GetPlayers()) do
         if p~=LP then
-            local label=(Cfg.ESP.RadarTarget==p.Name and "[RASTREANDO] " or "[DISPONIVEL] ")..p.Name
+            local label=(Cfg.ESP.RadarTargets[p.Name] and "[RASTREANDO] " or "[DISPONIVEL] ")..p.Name
             radarNames[#radarNames+1]=label; radarMap[label]=p.Name
         end
     end
     if #radarNames==0 then radarNames={"No players found"} end
     if Options.RadarList then Options.RadarList:SetValues(radarNames) end
 end
-Tabs.Radar:AddSection("Single Target Radar")
+local function ApplyRadarSelection()
+    local selected={}
+    for label,enabled in pairs(radarSelected) do
+        if enabled then
+            local name=radarMap[label] or label
+            if name and name~="No players found" and name~="Press Load Players" then selected[name]=true end
+        end
+    end
+    Cfg.ESP.RadarTargets=selected
+    local first=next(selected)
+    Cfg.ESP.RadarTarget=first or ""
+    Cfg.ESP.RadarEnabled=first~=nil
+    RefreshRadarList()
+end
+Tabs.Radar:AddSection("Multi Target Radar")
 T(Tabs.Radar,"RadarEnabled","Enable Radar Filter",function() return Cfg.ESP.RadarEnabled end,function(v) Cfg.ESP.RadarEnabled=v end)
-Tabs.Radar:AddDropdown("RadarList",{Title="Target / status",Values=radarNames,Multi=false,Default=1,Callback=function(v) radarSelected=radarMap[v] or v end})
-Tabs.Radar:AddButton({Title="Load Players",Callback=RefreshRadarList})
-Tabs.Radar:AddButton({Title="Track Selected",Callback=function()
-    if radarSelected and radarSelected~="No players found" and radarSelected~="Press Load Players" then Cfg.ESP.RadarTarget=radarSelected; Cfg.ESP.RadarEnabled=true; RefreshRadarList() end
+Tabs.Radar:AddDropdown("RadarList",{Title="Targets / status",Values=radarNames,Multi=true,Default={},Callback=function(v)
+    radarSelected={}
+    if type(v)=="table" then
+        for key,value in pairs(v) do
+            if type(key)=="number" then
+                radarSelected[value]=true
+            elseif value then
+                radarSelected[key]=true
+            end
+        end
+    elseif type(v)=="string" then
+        radarSelected[v]=true
+    end
 end})
-Tabs.Radar:AddButton({Title="Clear Radar Target",Callback=function() Cfg.ESP.RadarTarget=""; Cfg.ESP.RadarEnabled=false; RefreshRadarList() end})
-T(Tabs.Radar,"RadarHighlight","Highlight Target in ESP",function() return Cfg.ESP.RadarHighlight end,function(v) Cfg.ESP.RadarHighlight=v end)
-Tabs.Radar:AddParagraph({Title="Radar / ESP",Content="When Highlight is enabled, the selected target remains visible with a separate color instead of filtering the ESP to one player."})
+Tabs.Radar:AddButton({Title="Load Players",Callback=RefreshRadarList})
+Tabs.Radar:AddButton({Title="Track Selected Players",Callback=ApplyRadarSelection})
+Tabs.Radar:AddButton({Title="Clear Radar Targets",Callback=function()
+    radarSelected={}; Cfg.ESP.RadarTargets={}; Cfg.ESP.RadarTarget=""; Cfg.ESP.RadarEnabled=false; RefreshRadarList()
+end})
+T(Tabs.Radar,"RadarHighlight","Highlight Targets in ESP",function() return Cfg.ESP.RadarHighlight end,function(v) Cfg.ESP.RadarHighlight=v end)
+SyncRadarSelectionVisual=function()
+    if type(Cfg.ESP.RadarTargets)~="table" then Cfg.ESP.RadarTargets={} end
+    radarSelected={}
+    RefreshRadarList()
+    local selectedLabels={}
+    for label,name in pairs(radarMap) do
+        if Cfg.ESP.RadarTargets[name] then
+            radarSelected[label]=true
+            selectedLabels[#selectedLabels+1]=label
+        end
+    end
+    if Options.RadarList and Options.RadarList.SetValue then
+        pcall(function() Options.RadarList:SetValue(selectedLabels) end)
+    end
+end
+Tabs.Radar:AddParagraph({Title="Radar / ESP",Content="Selecione vários jogadores no menu e use Track Selected Players. Com Highlight ativo, todos os alvos rastreados recebem a cor de destaque."})
 
 Tabs.Binds:AddSection("Menu and Systems")
 BindButton(Tabs.Binds,"Toggle Menu",function() return Cfg.Settings.ToggleKeyName end,function(k,n) Cfg.Settings.ToggleKey=k; Cfg.Settings.ToggleKeyName=n end)
@@ -1879,8 +2168,9 @@ BindButton(Tabs.Binds,"Aimbot Toggle",function() return Cfg.Settings.AimbotKeyNa
 BindButton(Tabs.Binds,"Fly Toggle",function() return Cfg.Settings.FlyKeyName end,function(k,n) Cfg.Settings.FlyKey=k; Cfg.Settings.FlyKeyName=n end)
 BindButton(Tabs.Binds,"Noclip Toggle",function() return Cfg.Settings.NoclipKeyName end,function(k,n) Cfg.Settings.NoclipKey=k; Cfg.Settings.NoclipKeyName=n end)
 BindButton(Tabs.Binds,"Speed Toggle",function() return Cfg.Settings.SpeedKeyName end,function(k,n) Cfg.Settings.SpeedKey=k; Cfg.Settings.SpeedKeyName=n end)
-BindButton(Tabs.Binds,"Click Teleport Toggle",function() return Cfg.Settings.ClickTpKeyName end,function(k,n) Cfg.Settings.ClickTpKey=k; Cfg.Settings.ClickTpKeyName=n end)
-Tabs.Binds:AddParagraph({Title="Mouse support",Content="All bind selectors accept keyboard keys, Mouse1-Mouse5 and mouse wheel."})
+    BindButton(Tabs.Binds,"Click Teleport Toggle",function() return Cfg.Settings.ClickTpKeyName end,function(k,n) Cfg.Settings.ClickTpKey=k; Cfg.Settings.ClickTpKeyName=n end)
+    BindButton(Tabs.Binds,"Telecinese Toggle",function() return Cfg.Settings.TelekinesisKeyName end,function(k,n) Cfg.Settings.TelekinesisKey=k; Cfg.Settings.TelekinesisKeyName=n end)
+    Tabs.Binds:AddParagraph({Title="Mouse support",Content="All bind selectors accept keyboard keys, Mouse1-Mouse5 and mouse wheel."})
 Tabs.Binds:AddButton({Title="Check Bind Conflicts",Callback=function()
     local conflicts=NotifyBindConflicts()
     if #conflicts==0 then Fluent:Notify({Title="Binds",Content="No conflicts detected.",Duration=2}) end
@@ -1893,6 +2183,7 @@ Tabs.Binds:AddButton({Title="Clear All Binds",Callback=function()
     Cfg.Settings.NoclipKey,Cfg.Settings.NoclipKeyName=Enum.KeyCode.F6,"F6"
     Cfg.Settings.SpeedKey,Cfg.Settings.SpeedKeyName=Enum.KeyCode.F7,"F7"
     Cfg.Settings.ClickTpKey,Cfg.Settings.ClickTpKeyName=Enum.KeyCode.F8,"F8"
+    Cfg.Settings.TelekinesisKey,Cfg.Settings.TelekinesisKeyName=Enum.KeyCode.Y,"Y"
     Cfg.Aim.AimKey,Cfg.Aim.AimKeyName=Enum.KeyCode.E,"E"
     for title,entry in pairs(_bindButtons) do SetBindButtonTitle(entry,title..": ["..tostring(entry.GetName() or "None").."]",title) end
     UpdateVisibleText("Aim Lock Bind: [",AimBindLabel())
@@ -1945,25 +2236,16 @@ end)
 CustomList("FOVColor","Aim FOV Color",_colorValues,Cfg.Aim.FOVColorName or "Red",function(v) if CustomColors[v] then Cfg.Aim.FOVColorName=v end end)
 CustomList("RadarColor","Radar Highlight Color",_colorValues,Cfg.ESP.RadarColorName or "Yellow",function(v) if CustomColors[v] then Cfg.ESP.RadarColorName=v end end)
 Tabs.Custom:AddParagraph({Title="Aplicação",Content="As cores do FOV e do destaque individual do Radar/ESP são salvas junto com a configuração."})
-Tabs.Settings:AddSection("Diagnostics")
-Tabs.Settings:AddParagraph({Title="Runtime diagnostics",Content="Shows module state, recent errors, frame update time and managed resources."})
-Tabs.Settings:AddButton({Title="Run Diagnostics",Callback=function()
-    local conflicts=FindBindConflicts()
-    if #conflicts>0 then DiagError("Binds","Conflicts: "..table.concat(conflicts," | ")) else DiagModule("Binds","ok",nil,0) end
-    Fluent:Notify({Title="Diagnostics",Content=DiagSummary(),Duration=7})
-end})
-Tabs.Settings:AddButton({Title="Reset Diagnostic Errors",Callback=function()
-    for name,v in pairs(_diag) do if v.status=="error" then v.status="reset"; v.error=nil end end
-    Fluent:Notify({Title="Diagnostics",Content="Errors reset.",Duration=2})
-end})
+
 T(Tabs.Settings,"VSync","VSync - sync ESP with game FPS",function() return Cfg.Settings.VSync end,function(v) Cfg.Settings.VSync=v; _espLastUpdate=0 end)
 local function ShutdownHub()
     if _hubShutdown then return end
     -- Stop every feature first.
     Cfg.ESP.Enabled=false; Cfg.Aim.Aimbot=false; Cfg.Trigger.Enabled=false
-    Cfg.Misc.Fly=false; Cfg.Misc.VehicleFly=false; Cfg.Misc.Noclip=false; Cfg.Misc.Speed=false; Cfg.Misc.HitboxExtender=false
-    pcall(DisableFly); pcall(DisableVehicleFly); pcall(DisableNoclip); pcall(ApplySpeed)
+    Cfg.Misc.Fly=false; Cfg.Misc.VehicleFly=false; Cfg.Misc.Telekinesis=false; Cfg.Misc.Noclip=false; Cfg.Misc.Speed=false; Cfg.Misc.HitboxExtender=false
+    pcall(_TK.Release); pcall(DisableFly); pcall(DisableVehicleFly); pcall(DisableNoclip); pcall(ApplySpeed)
     pcall(function() for player in pairs(_hbConns) do SetHitbox(player,false) end end)
+    pcall(function() for player,conn in pairs(_hbDescConns) do if conn then conn:Disconnect() end; _hbDescConns[player]=nil end end)
     pcall(function() for player in pairs(_hbOriginals) do RestoreHitbox(player) end end)
     -- Remove both ESP pools, including Deadline models not represented by Players.
     pcall(function() for player in pairs(ESPO) do KillESP(player) end end)
@@ -1997,7 +2279,7 @@ Tabs.Settings:AddParagraph({Title="Fluent UI",Content="Interface powered by Flue
 Tabs.Credits:AddSection("223JHUB 3.0")
 Tabs.Credits:AddParagraph({Title="Developers",Content="Bruno223j and TY"})
 Tabs.Credits:AddParagraph({Title="Discord",Content="bruno223j & frty2017"})
-Tabs.Credits:AddParagraph({Title="Version 3.0",Content="Themes, colors, TriggerBot modes and adaptive performance updated."})
+Tabs.Credits:AddParagraph({Title="Version 3.0",Content="Themes, colors and TriggerBot modes updated."})
 Window:SelectTab(1)
 Fluent:Notify({Title="223JHUB 3.0",Content="Interface loaded with the latest updates.",Duration=4})
 -- O Fluent pode alterar o foco durante a montagem; aplica o estado final depois disso.
