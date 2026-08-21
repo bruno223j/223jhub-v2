@@ -517,7 +517,7 @@ local _vehicleNoclipConn=nil
 local _vehicleNoclipModel=nil
 local _vehicleNoclipOriginals={}
 local _vehicleNoclipGroup="223JVehicleNoclip"
-local _vehicleNoclipLift=nil
+local _vehicleNoclipLifts={}
 local function EnsureVehicleNoclipGroup()
     return pcall(function()
         if not PhysicsService:IsCollisionGroupRegistered(_vehicleNoclipGroup) then PhysicsService:RegisterCollisionGroup(_vehicleNoclipGroup) end
@@ -528,21 +528,31 @@ local function EnsureVehicleNoclipGroup()
     end)
 end
 local function RestoreVehicleNoclip()
-    if _vehicleNoclipLift then pcall(function() _vehicleNoclipLift:Destroy() end); _vehicleNoclipLift=nil end
+    for root,force in pairs(_vehicleNoclipLifts) do if force then pcall(function() force:Destroy() end) end end
+    _vehicleNoclipLifts={}
     for part,state in pairs(_vehicleNoclipOriginals) do
         if part and part.Parent then pcall(function()
             part.CollisionGroup=state.CollisionGroup
             part.CanCollide=state.CanCollide
+            if state.CanTouch~=nil then part.CanTouch=state.CanTouch end
+            if state.CanQuery~=nil then part.CanQuery=state.CanQuery end
         end) end
     end
     _vehicleNoclipOriginals={}
     _vehicleNoclipModel=nil
 end
-local function SaveVehicleNoclipPart(part,disableCollide)
+local function SaveVehicleNoclipPart(part)
     if not part or not part:IsA("BasePart") then return end
-    if _vehicleNoclipOriginals[part]==nil then _vehicleNoclipOriginals[part]={CollisionGroup=part.CollisionGroup,CanCollide=part.CanCollide} end
-    pcall(function() part.CollisionGroup=_vehicleNoclipGroup end)
-    if disableCollide then pcall(function() part.CanCollide=false end) end
+    if _vehicleNoclipOriginals[part]==nil then _vehicleNoclipOriginals[part]={CollisionGroup=part.CollisionGroup,CanCollide=part.CanCollide,CanTouch=part.CanTouch,CanQuery=part.CanQuery} end
+    pcall(function() part.CollisionGroup=_vehicleNoclipGroup; part.CanCollide=false; part.CanTouch=false; part.CanQuery=false end)
+    local assembly=part.AssemblyRootPart or part
+    if assembly and assembly.Parent and not _vehicleNoclipLifts[assembly] then
+        local force=Instance.new("BodyForce")
+        force.Name="223VehicleNoclipGravityCompensation"
+        force.Force=Vector3.new(0,assembly.AssemblyMass*Workspace.Gravity,0)
+        force.Parent=assembly
+        _vehicleNoclipLifts[assembly]=force
+    end
 end
 local function ApplyVehicleOccupantNoclip(model)
     for _,player in ipairs(Players:GetPlayers()) do
@@ -550,7 +560,7 @@ local function ApplyVehicleOccupantNoclip(model)
         local hum=char and char:FindFirstChildOfClass("Humanoid")
         local seat=hum and hum.SeatPart
         if seat and model and seat:IsDescendantOf(model) then
-            for _,obj in ipairs(char:GetDescendants()) do if obj:IsA("BasePart") then SaveVehicleNoclipPart(obj,true) end end
+            for _,obj in ipairs(char:GetDescendants()) do if obj:IsA("BasePart") then SaveVehicleNoclipPart(obj) end end
         end
     end
 end
@@ -560,24 +570,19 @@ local function DisableVehicleNoclip()
 end
 local function EnableVehicleNoclip()
     if _vehicleNoclipConn then return end
-    local groupReady=EnsureVehicleNoclipGroup()
+    EnsureVehicleNoclipGroup()
     _vehicleNoclipConn=AC(RunService.Stepped:Connect(function()
         if not Cfg.Misc.VehicleNoclip then return end
-        local model,root=GetVehicleModel()
+        local model=GetVehicleModel()
         if model~=_vehicleNoclipModel then
             RestoreVehicleNoclip()
             _vehicleNoclipModel=model
-            if root then
-                _vehicleNoclipLift=Instance.new("BodyForce")
-                _vehicleNoclipLift.Name="223VehicleNoclipGravityCompensation"
-                _vehicleNoclipLift.Parent=root
-            end
         end
         if not model then return end
-        for _,obj in ipairs(model:GetDescendants()) do if obj:IsA("BasePart") then SaveVehicleNoclipPart(obj,false) end end
+        for _,obj in ipairs(model:GetDescendants()) do if obj:IsA("BasePart") then SaveVehicleNoclipPart(obj) end end
         ApplyVehicleOccupantNoclip(model)
-        if _vehicleNoclipLift and root and root.Parent then
-            _vehicleNoclipLift.Force=Vector3.new(0,root.AssemblyMass*Workspace.Gravity,0)
+        for root,force in pairs(_vehicleNoclipLifts) do
+            if root and root.Parent and force and force.Parent then force.Force=Vector3.new(0,root.AssemblyMass*Workspace.Gravity,0) end
         end
     end))
 end
@@ -985,8 +990,7 @@ AC(UIS.InputBegan:Connect(function(inp,gp)
         end
         return
     end
-    if BindMatches(inp,Cfg.Settings.ToggleKey) then if _G._223JMenu_ToggleMenu then _G._223JMenu_ToggleMenu() end
-    elseif BindMatches(inp,Cfg.Settings.ESPKey) then Cfg.ESP.Enabled=not Cfg.ESP.Enabled; TR("ESP")
+    if BindMatches(inp,Cfg.Settings.ESPKey) then Cfg.ESP.Enabled=not Cfg.ESP.Enabled; TR("ESP")
     elseif BindMatches(inp,Cfg.Settings.AimbotKey) then Cfg.Aim.Aimbot=not Cfg.Aim.Aimbot; TR("Aim")
     elseif BindMatches(inp,Cfg.Settings.FlyKey) then Cfg.Misc.Fly=not Cfg.Misc.Fly; if Cfg.Misc.Fly then EnableFly() else DisableFly() end; TR("Fly")
     elseif BindMatches(inp,Cfg.Settings.NoclipKey) then Cfg.Misc.Noclip=not Cfg.Misc.Noclip; if Cfg.Misc.Noclip then EnableNoclip() else DisableNoclip() end; TR("NC")
@@ -1006,8 +1010,8 @@ local function AddIdentityCard(window,accent)
     if not root then return end
     local card=Instance.new("Frame")
     card.Name="223JIdentityCard"
-    card.AnchorPoint=Vector2.new(1,0)
-    card.Position=UDim2.new(1,-150,0,5)
+    card.AnchorPoint=Vector2.new(0,1)
+    card.Position=UDim2.new(0,12,1,-8)
     card.Size=UDim2.fromOffset(145,50)
     card.BackgroundColor3=Color3.fromRGB(18,18,22)
     card.BackgroundTransparency=0.12
@@ -1278,7 +1282,7 @@ local Window=Fluent:CreateWindow({
     Size=UDim2.fromOffset(Cfg.Settings.WindowWidth or 760,Cfg.Settings.WindowHeight or 560),
     Acrylic=false,
     Theme=((Cfg.Settings.ThemePreset=="Midnight" and "Darker") or (Cfg.Settings.ThemePreset=="Purple" and "Amethyst") or (Cfg.Settings.ThemePreset=="Light" and "Light") or (Cfg.Settings.ThemePreset or "Darker")),
-    MinimizeKey=Enum.KeyCode.RightShift
+    MinimizeKey=Enum.KeyCode.F13
 })
 -- Mantém dropdowns abertos dentro da área visível e evita que escapem pelas bordas.
 local _dropdownCheckElapsed=0
@@ -1600,7 +1604,7 @@ SyncGuiFromCfg=function()
         AimPrediction=Cfg.Aim.Prediction, AimWall=Cfg.Aim.WallCheck, AimTeam=Cfg.Aim.TeamCheck,
         FocusPriorityEnabled=Cfg.Aim.FocusPriorityEnabled,
         AimMaxDistanceEnabled=Cfg.Aim.MaxDistanceEnabled,
-        RadarHighlight=Cfg.ESP.RadarHighlight,
+        RadarHighlight=Cfg.ESP.RadarHighlight, Invisibility=Cfg.Misc.Invisibility,
         ESP=Cfg.ESP.Enabled, Box=Cfg.ESP.Box, Fill=Cfg.ESP.Fill,
         Names=Cfg.ESP.Names, Health=Cfg.ESP.HP, Tracers=Cfg.ESP.Tracers,
         Distance=Cfg.ESP.Dist, TeamCheck=Cfg.ESP.TeamCheck, Skeleton=Cfg.ESP.Skeleton,
