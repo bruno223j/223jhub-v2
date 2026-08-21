@@ -1,5 +1,5 @@
 -- 
---             223JHUB  v3.0  BY REVOLUCIONARI'US          
+--             223JHUB  v3.0  free universal script          
 --                 SCRIPT POR BRUNO223J E TY                 
 --               DISCORD: bruno223j  |  frty2017             
 -- 
@@ -25,6 +25,7 @@ function _223HUB_MAIN()
 
 local Players         = game:GetService("Players")
 local RunService      = game:GetService("RunService")
+local TweenService    = game:GetService("TweenService")
 local UIS             = game:GetService("UserInputService")
 local _mouseHeld={}
 local _M3,_M4,_M5
@@ -102,7 +103,7 @@ local function ServerHop()
     Rejoin()
 end
 
-if _G._223HUB_Kill then pcall(_G._223HUB_Kill) end
+if _G._223JMenu_Kill then pcall(_G._223JMenu_Kill) end
 local _conns = {}
 local _resources = {}
 local _hubShutdown=false
@@ -127,20 +128,20 @@ local function CleanupResources()
 end
 
 
-_G._223HUB_Kill = function()
+_G._223JMenu_Kill = function()
     if _hubShutdown then return end
     _hubShutdown=true
     for _,c in ipairs(_conns) do pcall(function() c:Disconnect() end) end
     _conns={}
-    if _G._223HUB_DrawPool then
-        for _,d in pairs(_G._223HUB_DrawPool) do pcall(function() d:Remove() end) end
-        _G._223HUB_DrawPool={}
+    if _G._223JMenu_DrawPool then
+        for _,d in pairs(_G._223JMenu_DrawPool) do pcall(function() d:Remove() end) end
+        _G._223JMenu_DrawPool={}
     end
     CleanupResources()
     if _GuiParent:FindFirstChild("223TYHUB") then _GuiParent:FindFirstChild("223TYHUB"):Destroy() end
 end
-_G._223HUB_DrawPool = _G._223HUB_DrawPool or {}
-local DrawPool = _G._223HUB_DrawPool
+_G._223JMenu_DrawPool = _G._223JMenu_DrawPool or {}
+local DrawPool = _G._223JMenu_DrawPool
 
 local _espInterval=1/30
 local Cfg = {
@@ -193,7 +194,7 @@ SpeedKey=Enum.KeyCode.F7,    SpeedKeyName="F7",
         TelekinesisKey=Enum.KeyCode.Y, TelekinesisKeyName="Y",
         ToggleKeyName="Mouse3",
         BlockGameInput=false, VSync=true,
-        ThemePreset="Dark",
+        ThemePreset="Midnight",
         WindowWidth=760, WindowHeight=560,
     },
 }
@@ -216,7 +217,7 @@ local function SerCfg()
              Trigger=SafeSer(Cfg.Trigger),Misc=SafeSer(Cfg.Misc),
              Settings=SafeSer(Cfg.Settings),
              Personalization={
-                 ThemePreset=Cfg.Settings.ThemePreset or "Dark",
+                 ThemePreset=Cfg.Settings.ThemePreset or "Midnight",
                  ESPColorName=Cfg.ESP.ESPColorName or "Red",
                  FOVColorName=Cfg.Aim.FOVColorName or "Red",
                  RadarColorName=Cfg.ESP.RadarColorName or "Yellow",
@@ -587,115 +588,7 @@ local function RefreshHitboxes()
 end
 
 -- ============================================================
--- Deadline target resolver: uses the game's characters container instead of Players.Character.
-
-
-
-local function DeadlinePlayer(model)
-    local p=Players:GetPlayerFromCharacter(model)
-    if p then return p end
-    for _,candidate in ipairs(Players:GetPlayers()) do
-        if candidate.Name==model.Name or candidate.DisplayName==model.Name then return candidate end
-    end
-    return nil
-end
-
-local function DeadlineVisible(model,part)
-    if not Cfg.Aim.WallCheck then return true end
-    local params=RaycastParams.new()
-    params.FilterType=Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances={LP.Character}
-    local hit=Workspace:Raycast(Cam.CFrame.Position,part.Position-Cam.CFrame.Position,params)
-    return not hit or hit.Instance:IsDescendantOf(model)
-end
-
-
--- Deadline ESP pool: the Deadline game stores character models in Workspace.characters,
--- so it cannot reuse the universal Player-keyed ESPO table.
-local DeadlineDrawings={}
-local function MakeDeadlineESP(model)
-    if DeadlineDrawings[model] then return DeadlineDrawings[model] end
-    local d={
-        Box=ND("Square",{Filled=false,Thickness=1,Transparency=1,Color=Color3.fromRGB(0,255,255),Visible=false}),
-        Name=ND("Text",{Size=13,Center=true,Outline=true,Color=Color3.fromRGB(255,255,100),Visible=false}),
-        Tracer=ND("Line",{Thickness=1,Transparency=0.75,Color=Color3.fromRGB(255,0,0),Visible=false}),
-        Tool=ND("Text",{Size=12,Center=true,Outline=true,Color=Cfg.ESP.ToolColor,Visible=false}),
-        HPBar=ND("Square",{Filled=true,Color=Color3.fromRGB(0,255,0),Visible=false}),
-        HPBg=ND("Square",{Filled=true,Color=Cfg.ESP.HPBgColor,Transparency=0.7,Visible=false})
-    }
-    DeadlineDrawings[model]=d
-    return d
-end
-local function HideDeadlineESP(d)
-    if not d then return end
-    for _,v in pairs(d) do SafeHide(v) end
-end
-local function DestroyDeadlineESP(model)
-    local d=DeadlineDrawings[model]
-    if not d then return end
-    for _,v in pairs(d) do
-        ReleaseResource(v)
-        DrawPool[v]=nil
-    end
-    DeadlineDrawings[model]=nil
-end
-local function UpdateDeadlineESP()
-    local folder=Workspace:FindFirstChild("characters") or Workspace:FindFirstChild("Characters")
-    if not folder then
-        for _,d in pairs(DeadlineDrawings) do HideDeadlineESP(d) end
-        return
-    end
-    local localChar=LP.Character
-    local localRoot=localChar and (localChar:FindFirstChild("HumanoidRootPart") or localChar:FindFirstChildWhichIsA("BasePart",true))
-    local localPos=localRoot and localRoot.Position
-    local seen={}
-    for _,model in ipairs(folder:GetChildren()) do
-        local root=model:FindFirstChild("HumanoidRootPart") or model:FindFirstChildWhichIsA("BasePart",true)
-        if root and model~=localChar then
-            seen[model]=true
-            local d=MakeDeadlineESP(model)
-            local rootPos,onScreen=Cam:WorldToViewportPoint(root.Position)
-            local player=DeadlinePlayer(model)
-            local radarFilter=Cfg.ESP.RadarEnabled and not Cfg.ESP.RadarHighlight
-            local radarAllowed=not radarFilter or next(Cfg.ESP.RadarTargets)==nil or (player and Cfg.ESP.RadarTargets[player.Name]) or Cfg.ESP.RadarTargets[model.Name]
-            local allowed=(not Cfg.ESP.TeamCheck or not player or not SameTeam(player)) and radarAllowed
-            local dist=localPos and (root.Position-localPos).Magnitude or 0
-            local visible=not Cfg.ESP.WallCheck or DeadlineVisible(model,root)
-            if not onScreen or rootPos.Z<0 or dist>Cfg.ESP.MaxDist or not allowed or not visible then
-                HideDeadlineESP(d)
-            else
-                -- Exact Deadline geometry from the supplied script.
-                local topPos=Cam:WorldToViewportPoint(root.Position+Vector3.new(0,2.5,0))
-                local bottomPos=Cam:WorldToViewportPoint(root.Position-Vector3.new(0,3,0))
-                local boxHeight=math.abs(topPos.Y-bottomPos.Y)
-                local boxWidth=boxHeight*0.6
-                local boxPos=Vector2.new(rootPos.X-boxWidth/2,math.min(topPos.Y,bottomPos.Y))
-                local radarFocus=Cfg.ESP.RadarHighlight and next(Cfg.ESP.RadarTargets)~=nil and player and Cfg.ESP.RadarTargets[player.Name]
-                local radarColor=FOVColors[Cfg.ESP.RadarColorName] or FOVColors.Yellow
-                if Cfg.ESP.Box then SafeSet(d.Box,{Size=Vector2.new(boxWidth,boxHeight),Position=boxPos,Color=radarFocus and radarColor or Color3.fromRGB(0,255,255),Visible=true}) else SafeHide(d.Box) end
-                if Cfg.ESP.Names then SafeSet(d.Name,{Text=model.Name.." ["..math.floor(dist).."m]",Position=Vector2.new(rootPos.X,boxPos.Y-20),Color=radarFocus and radarColor or Color3.fromRGB(255,255,100),Visible=true}) else SafeHide(d.Name) end
-                if Cfg.ESP.HeldTool then
-                    local tn=GetHeldTool(model)
-                    if tn then SafeSet(d.Tool,{Text="["..tn.."]",Position=Vector2.new(rootPos.X,boxPos.Y-35),Visible=true}) else SafeHide(d.Tool) end
-                else SafeHide(d.Tool) end
-                if Cfg.ESP.Tracers then SafeSet(d.Tracer,{From=Vector2.new(Cam.ViewportSize.X/2,Cam.ViewportSize.Y),To=Vector2.new(rootPos.X,bottomPos.Y),Color=radarFocus and radarColor or Color3.fromRGB(255,0,0),Visible=true}) else SafeHide(d.Tracer) end
-                if Cfg.ESP.HP then
-                    local hum=model:FindFirstChildOfClass("Humanoid")
-                    local hp=hum and hum.Health or 0
-                    local maxHp=hum and hum.MaxHealth or 1
-                    local ratio=math.clamp(hp/math.max(maxHp,1),0,1)
-                    local barH=boxHeight*ratio
-                    SafeSet(d.HPBg,{Position=Vector2.new(boxPos.X-7,boxPos.Y),Size=Vector2.new(5,boxHeight),Visible=true})
-                    SafeSet(d.HPBar,{Position=Vector2.new(boxPos.X-7,boxPos.Y+boxHeight-barH),Size=Vector2.new(5,barH),Color=Color3.fromRGB(0,255,0),Visible=true})
-                else SafeHide(d.HPBg); SafeHide(d.HPBar) end
-            end
-        end
-    end
-    for model,d in pairs(DeadlineDrawings) do
-        if not seen[model] or not model.Parent then DestroyDeadlineESP(model) end
-    end
-end
-
+-- Atualização das funções de movimento após respawn.
 AC(LP.CharacterAdded:Connect(function()
     task.wait(0.5)
     if Cfg.Misc.VehicleFly then Cfg.Misc.VehicleFly=false; DisableVehicleFly() end
@@ -704,13 +597,6 @@ AC(LP.CharacterAdded:Connect(function()
     if Cfg.Misc.Noclip then EnableNoclip() end
 end))
 
--- ============================================================
-AC(LP.CharacterAdded:Connect(function()
-    task.wait(0.5)
-    ApplySpeed()
-    if Cfg.Misc.Fly then EnableFly() end
-    if Cfg.Misc.Noclip then EnableNoclip() end
-end))
 -- CLICK TELEPORT
 -- Uses the current mouse hit position only while the toggle is enabled.
 -- ============================================================
@@ -922,7 +808,7 @@ AC(UIS.InputBegan:Connect(function(inp,gp)
         end
         return
     end
-    if BindMatches(inp,Cfg.Settings.ToggleKey) then if _G._223HUB_ToggleMenu then _G._223HUB_ToggleMenu() end
+    if BindMatches(inp,Cfg.Settings.ToggleKey) then if _G._223JMenu_ToggleMenu then _G._223JMenu_ToggleMenu() end
     elseif BindMatches(inp,Cfg.Settings.ESPKey) then Cfg.ESP.Enabled=not Cfg.ESP.Enabled; TR("ESP")
     elseif BindMatches(inp,Cfg.Settings.AimbotKey) then Cfg.Aim.Aimbot=not Cfg.Aim.Aimbot; TR("Aim")
     elseif BindMatches(inp,Cfg.Settings.FlyKey) then Cfg.Misc.Fly=not Cfg.Misc.Fly; if Cfg.Misc.Fly then EnableFly() else DisableFly() end; TR("Fly")
@@ -946,7 +832,7 @@ _fluentSource=_fluentSource:gsub("local y,z=function()if#l.Values>10 then v.Size
 local Fluent=loadstring(_fluentSource)()
 local _fluentNotify=Fluent.Notify
 Fluent.Notify=function(self,data,...)
-    if type(data)=="table" and data.Title=="Interface" and data.Content=="Press RightShift to toggle the interface." then return end
+    if type(data)=="table" and data.Title=="Interface" then return end
     return _fluentNotify(self,data,...)
 end
 
@@ -1108,7 +994,7 @@ end))
 local function RemoveInterfaceHint()
     local cg=game:GetService("CoreGui")
     for _,obj in ipairs(cg:GetDescendants()) do
-        if obj:IsA("TextLabel") and obj.Text=="Press RightShift to toggle the interface." then
+        if obj:IsA("TextLabel") and tostring(obj.Text):find("Press ",1,true) and tostring(obj.Text):find("toggle the",1,true) then
             local root=obj
             for _=1,4 do if root.Parent then root=root.Parent end end
             pcall(function() root:Destroy() end)
@@ -1121,13 +1007,17 @@ local Window=Fluent:CreateWindow({
     TabWidth=160,
     Size=UDim2.fromOffset(Cfg.Settings.WindowWidth or 760,Cfg.Settings.WindowHeight or 560),
     Acrylic=false,
-    Theme=(Cfg.Settings.ThemePreset=="Light" and "Light" or (Cfg.Settings.ThemePreset=="Purple" and "Amethyst" or (Cfg.Settings.ThemePreset or "Dark"))),
+    Theme=((Cfg.Settings.ThemePreset=="Midnight" and "Darker") or (Cfg.Settings.ThemePreset=="Purple" and "Amethyst") or (Cfg.Settings.ThemePreset=="Light" and "Light") or (Cfg.Settings.ThemePreset or "Darker")),
     MinimizeKey=Enum.KeyCode.RightShift
 })
 -- Mantém dropdowns abertos dentro da área visível e evita que escapem pelas bordas.
-local function KeepDropdownsInsideViewport()
+local _dropdownCheckElapsed=0
+local function KeepDropdownsInsideViewport(dt)
+    _dropdownCheckElapsed=_dropdownCheckElapsed+(tonumber(dt) or 0)
+    if _dropdownCheckElapsed<0.12 then return end
+    _dropdownCheckElapsed=0
     local frames=Fluent.OpenFrames
-    if type(frames)~="table" then return end
+    if type(frames)~="table" or #frames==0 then return end
     for _,frame in ipairs(frames) do
         if frame and frame:IsA("GuiObject") and frame.Visible then
             pcall(function() frame.ZIndex=100 end)
@@ -1158,7 +1048,6 @@ local function SetHubFocus(open)
 end
 
 local Tabs={
-    Home=Window:AddTab({Title="Home",Icon="home"}),
     Misc=Window:AddTab({Title="Misc",Icon="settings-2"}),
     Destruction=Window:AddTab({Title="zaralho",Icon="bomb"}),
     Spawn=Window:AddTab({Title="Spawn",Icon="package"}),
@@ -1169,11 +1058,31 @@ local Tabs={
     Credits=Window:AddTab({Title="Credits",Icon="heart"})
 }
 local Options=Fluent.Options
-Tabs.Home:AddSection("223J Menu")
-Tabs.Home:AddParagraph({Title="Menu complementar",Content="Movimento, telecinese, teleporte, ferramentas, saves, personalização e configurações."})
-_G._223HUB_ToggleMenu=function()
+local _menuAnimToken=0
+local _menuAnimScale=Instance.new("UIScale")
+_menuAnimScale.Scale=1
+_menuAnimScale.Parent=Window.Root
+local function AnimateMenuVisibility(open)
+    _menuAnimToken=_menuAnimToken+1
+    local token=_menuAnimToken
+    local root=Window.Root
+    if not root then return end
+    if open then
+        if Window.Minimized then pcall(function() Window:Minimize() end) end
+        root.Visible=true
+        _menuAnimScale.Scale=0.96
+        TweenService:Create(_menuAnimScale,TweenInfo.new(0.18,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{Scale=1}):Play()
+    else
+        root.Visible=true
+        TweenService:Create(_menuAnimScale,TweenInfo.new(0.16,Enum.EasingStyle.Quad,Enum.EasingDirection.In),{Scale=0.96}):Play()
+        task.delay(0.17,function()
+            if token==_menuAnimToken and not _hubMenuOpen and not Window.Minimized then pcall(function() Window:Minimize() end) end
+        end)
+    end
+end
+_G._223JMenu_ToggleMenu=function()
     _hubMenuOpen=not _hubMenuOpen
-    pcall(function() Window:Minimize() end)
+    AnimateMenuVisibility(_hubMenuOpen)
     SetHubFocus(_hubMenuOpen)
 end
 local function T(tab,id,title,getV,setV)
@@ -1373,13 +1282,14 @@ end})
 -- Tools are scanned only after the user presses Load Tools.
 
 -- Atualização explícita dos controles Fluent após LoadCfg/importação.
+local _customSelectors
 local _SaveColorMap={
     Red=Color3.fromRGB(220,40,40), Blue=Color3.fromRGB(40,130,240), Purple=Color3.fromRGB(160,50,220),
     Yellow=Color3.fromRGB(230,190,40), White=Color3.fromRGB(255,255,255), Green=Color3.fromRGB(50,210,100),
     Cyan=Color3.fromRGB(30,220,220), Orange=Color3.fromRGB(255,140,40), Pink=Color3.fromRGB(240,80,170), Aqua=Color3.fromRGB(60,180,255)
 }
 local function ApplyLoadedPersonalization()
-    local theme=Cfg.Settings.ThemePreset or "Dark"
+    local theme=Cfg.Settings.ThemePreset or "Midnight"
     local fluentTheme=(theme=="Purple" and "Amethyst") or (theme=="Midnight" and "Darker") or theme
     pcall(function() Fluent:SetTheme(fluentTheme) end)
     local espName=Cfg.ESP.ESPColorName or "Red"
@@ -1431,12 +1341,9 @@ SyncGuiFromCfg=function()
     set("AimPart",Cfg.Aim.AimPart); set("TriggerMode",Cfg.Trigger.Mode or "Semi")
     set("TelekinesisMode",Cfg.Misc.TelekinesisMode or "Hold")
     set("FocusPriority",Cfg.Aim.FocusPriority)
-    set("ESPMode",Cfg.ESP.Mode); set("ESPColor",Cfg.ESP.ESPColorName or "Red"); set("FOVColor",Cfg.Aim.FOVColorName); set("RadarColor",Cfg.ESP.RadarColorName)
+    set("ESPMode",Cfg.ESP.Mode)
     if SyncRadarSelectionVisual then task.defer(function() pcall(SyncRadarSelectionVisual) end) end
-    if _customSelectors.ThemePreset then _customSelectors.ThemePreset.SetValue(Cfg.Settings.ThemePreset or "Dark") end
-    if _customSelectors.ESPColor then _customSelectors.ESPColor.SetValue(Cfg.ESP.ESPColorName or "Red") end
-    if _customSelectors.FOVColor then _customSelectors.FOVColor.SetValue(Cfg.Aim.FOVColorName or "Red") end
-    if _customSelectors.RadarColor then _customSelectors.RadarColor.SetValue(Cfg.ESP.RadarColorName or "Yellow") end
+    if _customSelectors.ThemePreset then _customSelectors.ThemePreset.SetValue(Cfg.Settings.ThemePreset or "Midnight") end
     -- Reaplica uma segunda vez depois do SetValue para evitar que callbacks da GUI sobrescrevam o save.
     task.defer(function() pcall(ApplyLoadedPersonalization) end)
     for title,entry in pairs(_bindButtons) do
@@ -1551,7 +1458,7 @@ Tabs.Binds:AddButton({Title="Clear All Binds",Callback=function()
     SyncGuiAfterLoad()
 end})
 -- Os seletores de aparência usam uma lista interna; os demais controles permanecem no formato Fluent atual.
-local _customSelectors={}
+_customSelectors={}
 local function CustomList(id,title,values,default,callback)
     local index=1
     for i,v in ipairs(values) do if v==default then index=i break end end
@@ -1574,23 +1481,13 @@ local function CustomList(id,title,values,default,callback)
     end,Refresh=SetButtonLabel}
 end
 local _themeValues={"Dark","Midnight","Purple","Aqua","Rose","Light"}
-CustomList("ThemePreset","Tema",_themeValues,Cfg.Settings.ThemePreset or "Dark",function(v)
+CustomList("ThemePreset","Tema",_themeValues,Cfg.Settings.ThemePreset or "Midnight",function(v)
     Cfg.Settings.ThemePreset=v
     local theme=(v=="Purple" and "Amethyst") or (v=="Midnight" and "Darker") or v
     pcall(function() Fluent:SetTheme(theme) end)
 end)
 Tabs.Custom:AddParagraph({Title="Aparência",Content="Escolha um tema estável. O tema Purple usa o preset Amethyst da Fluent."})
-Tabs.Custom:AddSection("Personalização de cores")
-
-local _colorValues={"Red","Blue","Purple","Yellow","White","Green","Cyan","Orange","Pink","Aqua"}
-CustomList("ESPColor","ESP Color",_colorValues,Cfg.ESP.ESPColorName or "Red",function(v)
-    local c=CustomColors[v]
-    if c then Cfg.ESP.ESPColorName=v; Cfg.ESP.BoxColor=c; Cfg.ESP.FillColor=c; Cfg.ESP.NameColor=c; Cfg.ESP.TracerColor=c; Cfg.ESP.DistColor=c; Cfg.ESP.SkelColor=c end
-end)
-CustomList("FOVColor","Aim FOV Color",_colorValues,Cfg.Aim.FOVColorName or "Red",function(v) if CustomColors[v] then Cfg.Aim.FOVColorName=v end end)
-CustomList("RadarColor","Radar Highlight Color",_colorValues,Cfg.ESP.RadarColorName or "Yellow",function(v) if CustomColors[v] then Cfg.ESP.RadarColorName=v end end)
-Tabs.Custom:AddParagraph({Title="Aplicação",Content="As cores do FOV e do destaque individual do Radar/ESP são salvas junto com a configuração."})
-
+Tabs.Custom:AddParagraph({Title="Cores do ESP, FOV e Radar",Content="Essas cores agora são configuradas na aba Personalização do 223J Loader, que controla os recursos visuais."})
 T(Tabs.Settings,"VSync","VSync - sync ESP with game FPS",function() return Cfg.Settings.VSync end,function(v) Cfg.Settings.VSync=v; _espLastUpdate=0 end)
 local function ShutdownHub()
     if _hubShutdown then return end
@@ -1614,12 +1511,12 @@ local function ShutdownHub()
     pcall(function() if _GuiParent and _GuiParent:FindFirstChild("223TYHUB") then _GuiParent:FindFirstChild("223TYHUB"):Destroy() end end)
     pcall(function() UIS.MouseBehavior=Enum.MouseBehavior.Default; UIS.MouseIconEnabled=true end)
     _hubShutdown=true
-    pcall(function() if _G._223HUB_Kill then _G._223HUB_Kill() end end)
-    _G._223HUB_ToggleMenu=nil
-    _G._223HUB_Kill=nil
-    _G._223HUB_Shutdown=nil
+    pcall(function() if _G._223JMenu_Kill then _G._223JMenu_Kill() end end)
+    _G._223JMenu_ToggleMenu=nil
+    _G._223JMenu_Kill=nil
+    _G._223JMenu_Shutdown=nil
 end
-_G._223HUB_Shutdown=ShutdownHub
+_G._223JMenu_Shutdown=ShutdownHub
 Tabs.Settings:AddButton({Title="Unload 223JHUB",Callback=ShutdownHub})
 Tabs.Settings:AddParagraph({Title="Shutdown",Content="Stops all systems, disconnects events and removes the interface."})
 Tabs.Settings:AddSection("About")
@@ -1630,13 +1527,14 @@ Tabs.Credits:AddParagraph({Title="Developers",Content="Bruno223j and TY"})
 Tabs.Credits:AddParagraph({Title="Discord",Content="bruno223j & frty2017"})
 Tabs.Credits:AddParagraph({Title="Version 3.0",Content="Themes, colors and TriggerBot modes updated."})
 Window:SelectTab(1)
-Fluent:Notify({Title="223JHUB 3.0",Content="Interface loaded with the latest updates.",Duration=4})
 -- O Fluent pode alterar o foco durante a montagem; aplica o estado final depois disso.
 task.defer(function()
+    pcall(function() Window:SelectTab(1) end)
     RemoveInterfaceHint()
     task.delay(0.15,RemoveInterfaceHint)
     task.delay(0.6,RemoveInterfaceHint)
     SetHubFocus(_hubMenuOpen)
+    AnimateMenuVisibility(true)
     pcall(function() UIS.MouseBehavior=Enum.MouseBehavior.Default end)
     pcall(function() UIS.MouseIconEnabled=true end)
 end)
