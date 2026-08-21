@@ -177,7 +177,7 @@ Trigger = { Enabled=false, TeamCheck=false, Delay=80, Mode="Semi",
         VehicleFly=false, VehicleFlySpeed=100,
         VehicleSpeed=false, VehicleSpeedValue=100, VehicleNoclip=false,
         Telekinesis=false, TelekinesisForce=1000, TelekinesisMode="Hold",
-        Noclip=false,
+        Noclip=false, Invisibility=false,
 
         Speed=false, WalkSpeed=25, AntiAFK=false,
         HitboxExtender=false, TeamCheck=false, HitboxSize=8,
@@ -394,7 +394,8 @@ local function GetVehicleModel()
     if not seat or not (seat:IsA("Seat") or seat:IsA("VehicleSeat")) then return nil,nil end
     local model=seat:FindFirstAncestorOfClass("Model")
     if not model then return nil,nil end
-    local part=(model.PrimaryPart and model.PrimaryPart:IsA("BasePart")) and model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart",true)
+    local rawPart=(model.PrimaryPart and model.PrimaryPart:IsA("BasePart")) and model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart",true)
+    local part=rawPart and (rawPart.AssemblyRootPart or rawPart) or nil
     return model,part,seat
 end
 local function GetVehiclePart()
@@ -432,23 +433,25 @@ local function EnableVehicleFly()
         end
         local cf=Cam.CFrame
         local speed=tonumber(Cfg.Misc.VehicleFlySpeed) or 100
-        local forward=Vector3.new(cf.LookVector.X,0,cf.LookVector.Z)
-        if forward.Magnitude<0.01 then
-            local current=_vehiclePart.CFrame.LookVector
-            forward=Vector3.new(current.X,0,current.Z)
-        end
+        local cameraForward=Vector3.new(cf.LookVector.X,0,cf.LookVector.Z)
+        if cameraForward.Magnitude<0.01 then cameraForward=Vector3.new(0,0,-1) end
+        cameraForward=cameraForward.Unit
+        local cameraRight=Vector3.new(-cameraForward.Z,0,cameraForward.X)
+        local input=Vector3.zero
+        if UIS:IsKeyDown(Enum.KeyCode.W) then input=input+cameraForward end
+        if UIS:IsKeyDown(Enum.KeyCode.S) then input=input-cameraForward end
+        if UIS:IsKeyDown(Enum.KeyCode.A) then input=input-cameraRight end
+        if UIS:IsKeyDown(Enum.KeyCode.D) then input=input+cameraRight end
+        local forward=input.Magnitude>0.05 and input.Unit or Vector3.new(_vehiclePart.CFrame.LookVector.X,0,_vehiclePart.CFrame.LookVector.Z)
         if forward.Magnitude<0.01 then forward=Vector3.new(0,0,-1) end
         forward=forward.Unit
         local right=Vector3.new(-forward.Z,0,forward.X)
         local velocity=Vector3.zero
-        if UIS:IsKeyDown(Enum.KeyCode.W) then velocity=velocity+forward*speed end
-        if UIS:IsKeyDown(Enum.KeyCode.S) then velocity=velocity-forward*speed end
-        if UIS:IsKeyDown(Enum.KeyCode.A) then velocity=velocity-right*speed end
-        if UIS:IsKeyDown(Enum.KeyCode.D) then velocity=velocity+right*speed end
+        if input.Magnitude>0.05 then velocity=forward*speed end
         if UIS:IsKeyDown(Enum.KeyCode.Space) then velocity=velocity+Vector3.new(0,speed,0) end
         if UIS:IsKeyDown(Enum.KeyCode.LeftShift) then velocity=velocity-Vector3.new(0,speed,0) end
         _vehicleBV.Velocity=velocity
-        -- Mantém o veículo nivelado, como se estivesse dirigindo, sem inclinação da câmera.
+        -- O carro só muda de direção quando há input e permanece nivelado/estável quando parado.
         _vehicleBG.CFrame=CFrame.lookAt(_vehiclePart.Position,_vehiclePart.Position+forward,Vector3.yAxis)
     end))
 end
@@ -460,12 +463,15 @@ end
 local _vehicleSpeedConn=nil
 local _vehicleSpeedSeat=nil
 local _vehicleSpeedOriginalMax=nil
+local _vehicleSpeedOriginalTorque=nil
 local function RestoreVehicleSpeed()
-    if _vehicleSpeedSeat and _vehicleSpeedSeat.Parent and _vehicleSpeedOriginalMax~=nil then
-        pcall(function() _vehicleSpeedSeat.MaxSpeed=_vehicleSpeedOriginalMax end)
+    if _vehicleSpeedSeat and _vehicleSpeedSeat.Parent then
+        if _vehicleSpeedOriginalMax~=nil then pcall(function() _vehicleSpeedSeat.MaxSpeed=_vehicleSpeedOriginalMax end) end
+        if _vehicleSpeedOriginalTorque~=nil then pcall(function() _vehicleSpeedSeat.Torque=_vehicleSpeedOriginalTorque end) end
     end
     _vehicleSpeedSeat=nil
     _vehicleSpeedOriginalMax=nil
+    _vehicleSpeedOriginalTorque=nil
 end
 local function DisableVehicleSpeed()
     if _vehicleSpeedConn then _vehicleSpeedConn:Disconnect(); _vehicleSpeedConn=nil end
@@ -473,55 +479,80 @@ local function DisableVehicleSpeed()
 end
 local function EnableVehicleSpeed()
     if _vehicleSpeedConn then return end
-    _vehicleSpeedConn=AC(RunService.Heartbeat:Connect(function()
+    _vehicleSpeedConn=AC(RunService.Heartbeat:Connect(function(dt)
         if not Cfg.Misc.VehicleSpeed then return end
         local model,part,seat=GetVehicleModel()
-        if not model or not part or not part.Parent or not seat then
+        if not model or not part or not part.Parent or not seat or not seat:IsA("VehicleSeat") then
             RestoreVehicleSpeed()
             return
         end
-        if seat:IsA("VehicleSeat") then
-            if seat~=_vehicleSpeedSeat then
-                RestoreVehicleSpeed()
-                _vehicleSpeedSeat=seat
-                _vehicleSpeedOriginalMax=seat.MaxSpeed
+        if seat~=_vehicleSpeedSeat then
+            RestoreVehicleSpeed()
+            _vehicleSpeedSeat=seat
+            _vehicleSpeedOriginalMax=seat.MaxSpeed
+            _vehicleSpeedOriginalTorque=seat.Torque
+        end
+        local desired=math.clamp(tonumber(Cfg.Misc.VehicleSpeedValue) or 100,10,1000)
+        pcall(function()
+            seat.MaxSpeed=desired
+            seat.Torque=math.max(_vehicleSpeedOriginalTorque or 0,desired*35)
+        end)
+        -- Assistência progressiva: acelera até o limite, sem teletransportar a velocidade.
+        local throttle=0
+        pcall(function() throttle=seat.ThrottleFloat end)
+        if math.abs(throttle)>0.01 then
+            local current=part.AssemblyLinearVelocity
+            local horizontal=Vector3.new(current.X,0,current.Z)
+            local forward=Vector3.new(part.CFrame.LookVector.X,0,part.CFrame.LookVector.Z)
+            if horizontal.Magnitude>1 then forward=horizontal.Unit elseif forward.Magnitude>0.01 then forward=forward.Unit else forward=Vector3.new(0,0,-1) end
+            local acceleration=math.max(desired*2.5,40)
+            local nextSpeed=math.min(desired,horizontal.Magnitude+acceleration*(tonumber(dt) or 1/60))
+            if horizontal.Magnitude<desired then
+                part.AssemblyLinearVelocity=forward*(nextSpeed*math.sign(throttle))+Vector3.new(0,current.Y,0)
             end
-            local desired=math.clamp(tonumber(Cfg.Misc.VehicleSpeedValue) or 100,10,1000)
-            -- MaxSpeed altera o limite e deixa a aceleração/fricção nativas do veículo funcionarem.
-            pcall(function() seat.MaxSpeed=desired end)
         end
     end))
 end
-
 local _vehicleNoclipConn=nil
 local _vehicleNoclipModel=nil
 local _vehicleNoclipOriginals={}
 local _vehicleNoclipGroup="223JVehicleNoclip"
+local _vehicleNoclipLift=nil
 local function EnsureVehicleNoclipGroup()
-    local ok=pcall(function()
-        if not PhysicsService:IsCollisionGroupRegistered(_vehicleNoclipGroup) then
-            PhysicsService:RegisterCollisionGroup(_vehicleNoclipGroup)
-        end
+    return pcall(function()
+        if not PhysicsService:IsCollisionGroupRegistered(_vehicleNoclipGroup) then PhysicsService:RegisterCollisionGroup(_vehicleNoclipGroup) end
         for _,info in ipairs(PhysicsService:GetRegisteredCollisionGroups()) do
-            if info.name~=_vehicleNoclipGroup then
-                PhysicsService:CollisionGroupSetCollidable(_vehicleNoclipGroup,info.name,false)
-            end
+            PhysicsService:CollisionGroupSetCollidable(_vehicleNoclipGroup,info.name,false)
         end
         PhysicsService:CollisionGroupSetCollidable(_vehicleNoclipGroup,_vehicleNoclipGroup,false)
     end)
-    return ok
 end
 local function RestoreVehicleNoclip()
+    if _vehicleNoclipLift then pcall(function() _vehicleNoclipLift:Destroy() end); _vehicleNoclipLift=nil end
     for part,state in pairs(_vehicleNoclipOriginals) do
-        if part and part.Parent then
-            pcall(function()
-                if state.CollisionGroup then part.CollisionGroup=state.CollisionGroup end
-                if state.CanCollide~=nil then part.CanCollide=state.CanCollide end
-            end)
-        end
+        if part and part.Parent then pcall(function()
+            part.CollisionGroup=state.CollisionGroup
+            part.CanCollide=state.CanCollide
+        end) end
     end
     _vehicleNoclipOriginals={}
     _vehicleNoclipModel=nil
+end
+local function SaveVehicleNoclipPart(part,disableCollide)
+    if not part or not part:IsA("BasePart") then return end
+    if _vehicleNoclipOriginals[part]==nil then _vehicleNoclipOriginals[part]={CollisionGroup=part.CollisionGroup,CanCollide=part.CanCollide} end
+    pcall(function() part.CollisionGroup=_vehicleNoclipGroup end)
+    if disableCollide then pcall(function() part.CanCollide=false end) end
+end
+local function ApplyVehicleOccupantNoclip(model)
+    for _,player in ipairs(Players:GetPlayers()) do
+        local char=player.Character
+        local hum=char and char:FindFirstChildOfClass("Humanoid")
+        local seat=hum and hum.SeatPart
+        if seat and model and seat:IsDescendantOf(model) then
+            for _,obj in ipairs(char:GetDescendants()) do if obj:IsA("BasePart") then SaveVehicleNoclipPart(obj,true) end end
+        end
+    end
 end
 local function DisableVehicleNoclip()
     if _vehicleNoclipConn then _vehicleNoclipConn:Disconnect(); _vehicleNoclipConn=nil end
@@ -532,28 +563,24 @@ local function EnableVehicleNoclip()
     local groupReady=EnsureVehicleNoclipGroup()
     _vehicleNoclipConn=AC(RunService.Stepped:Connect(function()
         if not Cfg.Misc.VehicleNoclip then return end
-        local model=GetVehicleModel()
+        local model,root=GetVehicleModel()
         if model~=_vehicleNoclipModel then
             RestoreVehicleNoclip()
             _vehicleNoclipModel=model
+            if root then
+                _vehicleNoclipLift=Instance.new("BodyForce")
+                _vehicleNoclipLift.Name="223VehicleNoclipGravityCompensation"
+                _vehicleNoclipLift.Parent=root
+            end
         end
         if not model then return end
-        for _,obj in ipairs(model:GetDescendants()) do
-            if obj:IsA("BasePart") then
-                if _vehicleNoclipOriginals[obj]==nil then
-                    _vehicleNoclipOriginals[obj]={CollisionGroup=obj.CollisionGroup,CanCollide=obj.CanCollide}
-                end
-                if groupReady then
-                    pcall(function() obj.CollisionGroup=_vehicleNoclipGroup end)
-                else
-                    -- Fallback somente se o executor não permitir CollisionGroup.
-                    pcall(function() obj.CanCollide=false end)
-                end
-            end
+        for _,obj in ipairs(model:GetDescendants()) do if obj:IsA("BasePart") then SaveVehicleNoclipPart(obj,false) end end
+        ApplyVehicleOccupantNoclip(model)
+        if _vehicleNoclipLift and root and root.Parent then
+            _vehicleNoclipLift.Force=Vector3.new(0,root.AssemblyMass*Workspace.Gravity,0)
         end
     end))
 end
-
 -- ============================================================
 -- NOCLIP
 -- ============================================================
@@ -703,6 +730,37 @@ local function RefreshHitboxes()
     end
 end
 
+
+-- ============================================================
+-- INVISIBILITY
+-- ============================================================
+local _invisibilityOriginals={}
+local function RestoreInvisibility()
+    for obj,state in pairs(_invisibilityOriginals) do
+        if obj and obj.Parent then pcall(function()
+            if state.kind=="part" then obj.LocalTransparencyModifier=state.value else obj.Transparency=state.value end
+        end) end
+    end
+    _invisibilityOriginals={}
+end
+local function DisableInvisibility()
+    RestoreInvisibility()
+end
+local function EnableInvisibility()
+    RestoreInvisibility()
+    local char=LP.Character
+    if not char then return end
+    for _,obj in ipairs(char:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            _invisibilityOriginals[obj]={kind="part",value=obj.LocalTransparencyModifier}
+            obj.LocalTransparencyModifier=1
+        elseif obj:IsA("Decal") or obj:IsA("Texture") then
+            _invisibilityOriginals[obj]={kind="texture",value=obj.Transparency}
+            obj.Transparency=1
+        end
+    end
+end
+
 -- ============================================================
 -- Atualização das funções de movimento após respawn.
 AC(LP.CharacterAdded:Connect(function()
@@ -713,6 +771,7 @@ AC(LP.CharacterAdded:Connect(function()
     if Cfg.Misc.Noclip then EnableNoclip() end
     if Cfg.Misc.VehicleSpeed then EnableVehicleSpeed() end
     if Cfg.Misc.VehicleNoclip then EnableVehicleNoclip() end
+    if Cfg.Misc.Invisibility then EnableInvisibility() end
 end))
 
 -- CLICK TELEPORT
@@ -941,6 +1000,35 @@ end))
 -- ============================================================
 -- GUI Fluent
 local _fluentSource=game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua")
+
+local function AddIdentityCard(window,accent)
+    local root=window and window.Root
+    if not root then return end
+    local card=Instance.new("Frame")
+    card.Name="223JIdentityCard"
+    card.AnchorPoint=Vector2.new(1,0)
+    card.Position=UDim2.new(1,-150,0,5)
+    card.Size=UDim2.fromOffset(145,50)
+    card.BackgroundColor3=Color3.fromRGB(18,18,22)
+    card.BackgroundTransparency=0.12
+    card.BorderSizePixel=0
+    card.ZIndex=50
+    card.Parent=root
+    local corner=Instance.new("UICorner"); corner.CornerRadius=UDim.new(0,8); corner.Parent=card
+    local stroke=Instance.new("UIStroke"); stroke.Color=accent or Color3.fromRGB(70,70,78); stroke.Transparency=0.35; stroke.Parent=card
+    local avatar=Instance.new("ImageLabel")
+    avatar.Name="Avatar"; avatar.BackgroundTransparency=1; avatar.Position=UDim2.fromOffset(7,6); avatar.Size=UDim2.fromOffset(38,38); avatar.ZIndex=51; avatar.Parent=card
+    local avatarCorner=Instance.new("UICorner"); avatarCorner.CornerRadius=UDim.new(1,0); avatarCorner.Parent=avatar
+    local ok,url=pcall(function() return Players:GetUserThumbnailAsync(LP.UserId,Enum.ThumbnailType.HeadShot,Enum.ThumbnailSize.Size100x100) end)
+    if ok and url then avatar.Image=url end
+    local display=Instance.new("TextLabel")
+    display.BackgroundTransparency=1; display.Position=UDim2.fromOffset(52,6); display.Size=UDim2.fromOffset(86,20); display.Font=Enum.Font.GothamSemibold; display.TextSize=13; display.TextColor3=Color3.fromRGB(245,245,248); display.TextXAlignment=Enum.TextXAlignment.Left; display.TextTruncate=Enum.TextTruncate.AtEnd; display.Text=LP.DisplayName or LP.Name; display.ZIndex=51; display.Parent=card
+    local username=Instance.new("TextLabel")
+    username.BackgroundTransparency=1; username.Position=UDim2.fromOffset(52,26); username.Size=UDim2.fromOffset(86,16); username.Font=Enum.Font.Gotham; username.TextSize=10; username.TextColor3=Color3.fromRGB(170,170,178); username.TextXAlignment=Enum.TextXAlignment.Left; username.TextTruncate=Enum.TextTruncate.AtEnd; username.Text="@"..LP.Name; username.ZIndex=51; username.Parent=card
+    return card
+end
+AddIdentityCard(Window,Color3.fromRGB(70,150,220))
+
 -- Mantém o dropdown como popup independente, com altura limitada e reposicionamento automático conforme o espaço disponível.
 _fluentSource=_fluentSource:gsub("BackgroundTransparency=1,Size=UDim2.new(1,0,0,300),Position=UDim2.fromOffset(0,42),Parent=m.Frame,Visible=false","BackgroundTransparency=1,Size=UDim2.fromOffset(170,300),Parent=h.Library.GUI,Visible=false")
 _fluentSource=_fluentSource:gsub("local w,x=function()v.Position=UDim2.fromOffset(0,42)end,0","local w,x=function()local w=0 if ai.ViewportSize.Y-p.AbsolutePosition.Y<v.AbsoluteSize.Y-5 then w=v.AbsoluteSize.Y-5-(ai.ViewportSize.Y-p.AbsolutePosition.Y)+40 end v.Position=UDim2.fromOffset(p.AbsolutePosition.X-1,p.AbsolutePosition.Y-5-w)end,0")
@@ -996,7 +1084,8 @@ end
 _TK.HoldPosition=function()
     local char=LP.Character
     local root=char and char:FindFirstChild("HumanoidRootPart")
-    return root and root.Position+Vector3.new(0,10,0) or nil
+    local head=char and char:FindFirstChild("Head")
+    return head and head.Position+Cam.CFrame.LookVector*2+Vector3.new(0,3,0) or (root and root.Position+Vector3.new(0,10,0) or nil)
 end
 _TK.Direction=function()
     local direction=Cam.CFrame.LookVector+Vector3.new(0,0.35,0)
@@ -1039,13 +1128,14 @@ _TK.Hold=function(kind,model,root)
     local bodyPosition=Instance.new("BodyPosition")
     bodyPosition.Name="223TelekinesisHold"
     bodyPosition.MaxForce=Vector3.new(1e9,1e9,1e9)
-    bodyPosition.P=100000; bodyPosition.D=6000
+    bodyPosition.P=250000; bodyPosition.D=12000
+    bodyPosition.MaxVelocity=math.huge
     bodyPosition.Position=_TK.HoldPosition() or root.Position
     bodyPosition.Parent=root
     local bodyGyro=Instance.new("BodyGyro")
     bodyGyro.Name="223TelekinesisRotation"
     bodyGyro.MaxTorque=Vector3.new(1e9,1e9,1e9)
-    bodyGyro.P=50000; bodyGyro.D=5000
+    bodyGyro.P=120000; bodyGyro.D=10000
     bodyGyro.CFrame=_TK.StableHoldCFrame(bodyPosition.Position)
     bodyGyro.Parent=root
     local collisionOriginals={}
@@ -1114,13 +1204,22 @@ _TK.Action=function()
     if _TK.Hold("Vehicle",model,root) then Fluent:Notify({Title="Telecinese",Content="Veículo segurado acima de você. Clique para lançar.",Duration=2}) end
 end
 
+local _alignedTargets={}
+local _alignmentConn=nil
+local function UnalignAllPlayers(silent)
+    if _alignmentConn then _alignmentConn:Disconnect(); _alignmentConn=nil end
+    for player,state in pairs(_alignedTargets) do
+        if state.Character and state.Character.Parent and state.OriginalPivot then pcall(function() state.Character:PivotTo(state.OriginalPivot) end) end
+        if state.Humanoid and state.Humanoid.Parent and state.AutoRotate~=nil then pcall(function() state.Humanoid.AutoRotate=state.AutoRotate end) end
+    end
+    _alignedTargets={}
+    if not silent then Fluent:Notify({Title="Matar todos",Content="Alvos desalinhados e posições restauradas.",Duration=3}) end
+end
 local function AlignAllPlayersForTest()
     local char=LP.Character
     local root=char and char:FindFirstChild("HumanoidRootPart")
-    if not root then
-        Fluent:Notify({Title="Matar todos",Content="Seu personagem ainda não está pronto.",Duration=2})
-        return
-    end
+    if not root then Fluent:Notify({Title="Matar todos",Content="Seu personagem ainda não está pronto.",Duration=2}); return end
+    UnalignAllPlayers(true)
     local forward=Vector3.new(Cam.CFrame.LookVector.X,0,Cam.CFrame.LookVector.Z)
     if forward.Magnitude<0.01 then forward=Vector3.new(0,0,-1) end
     forward=forward.Unit
@@ -1130,17 +1229,30 @@ local function AlignAllPlayersForTest()
         if player~=LP and player.Character and player.Character.Parent then
             local hum=player.Character:FindFirstChildOfClass("Humanoid")
             local head=player.Character:FindFirstChild("Head")
-            if hum and hum.Health>0 and head then targets[#targets+1]=player end
+            local targetRoot=player.Character:FindFirstChild("HumanoidRootPart")
+            if hum and hum.Health>0 and head and targetRoot then targets[#targets+1]=player end
         end
     end
     local center=root.Position+forward*22+Vector3.new(0,0.5,0)
     for index,player in ipairs(targets) do
-        local offset=(index-(#targets+1)/2)*4
-        local position=center+right*offset
         local targetChar=player.Character
-        pcall(function()
-            targetChar:PivotTo(CFrame.lookAt(position,root.Position,Vector3.yAxis))
-        end)
+        local targetHum=targetChar:FindFirstChildOfClass("Humanoid")
+        local targetRoot=targetChar:FindFirstChild("HumanoidRootPart")
+        local offset=(index-(#targets+1)/2)*4
+        local desired=CFrame.lookAt(center+right*offset,root.Position,Vector3.yAxis)
+        _alignedTargets[player]={Character=targetChar,Humanoid=targetHum,OriginalPivot=targetChar:GetPivot(),Desired=desired,AutoRotate=targetHum.AutoRotate}
+        pcall(function() targetHum.AutoRotate=false; targetChar:PivotTo(desired) end)
+    end
+    if #targets>0 then
+        _alignmentConn=AC(RunService.Heartbeat:Connect(function()
+            for player,state in pairs(_alignedTargets) do
+                if not player.Parent or not state.Character or not state.Character.Parent then
+                    _alignedTargets[player]=nil
+                else
+                    pcall(function() state.Character:PivotTo(state.Desired) end)
+                end
+            end
+        end))
     end
     Fluent:Notify({Title="Matar todos",Content=(#targets>0 and ("Alvos alinhados: "..#targets) or "Nenhum alvo vivo encontrado."),Duration=3})
 end
@@ -1219,28 +1331,29 @@ local Tabs={
 local Options=Fluent.Options
 local _menuAnimToken=0
 local _menuAnimTween=nil
-local _menuAnimScale=Instance.new("UIScale")
-_menuAnimScale.Scale=1
-_menuAnimScale.Parent=Window.Root
+local _menuBasePosition=Window.Root.Position
 local function AnimateMenuVisibility(open)
     _menuAnimToken=_menuAnimToken+1
     local token=_menuAnimToken
     local root=Window.Root
     if not root then return end
+    local offset=UDim2.fromOffset(0,20)
+    if _menuAnimTween then pcall(function() _menuAnimTween:Cancel() end) end
     if open then
         if Window.Minimized then pcall(function() Window:Minimize() end) end
         root.Visible=true
-        if _menuAnimTween then pcall(function() _menuAnimTween:Cancel() end) end
-        if _menuAnimScale.Scale>=0.999 then _menuAnimScale.Scale=0.82 end
-        _menuAnimTween=TweenService:Create(_menuAnimScale,TweenInfo.new(0.24,Enum.EasingStyle.Quart,Enum.EasingDirection.Out),{Scale=1})
+        root.Position=_menuBasePosition+offset
+        _menuAnimTween=TweenService:Create(root,TweenInfo.new(0.22,Enum.EasingStyle.Quint,Enum.EasingDirection.Out),{Position=_menuBasePosition})
         _menuAnimTween:Play()
     else
         root.Visible=true
-        if _menuAnimTween then pcall(function() _menuAnimTween:Cancel() end) end
-        _menuAnimTween=TweenService:Create(_menuAnimScale,TweenInfo.new(0.20,Enum.EasingStyle.Quart,Enum.EasingDirection.In),{Scale=0.82})
+        _menuAnimTween=TweenService:Create(root,TweenInfo.new(0.18,Enum.EasingStyle.Quint,Enum.EasingDirection.In),{Position=_menuBasePosition+offset})
         _menuAnimTween:Play()
-        task.delay(0.21,function()
-            if token==_menuAnimToken and not _hubMenuOpen and not Window.Minimized then pcall(function() Window:Minimize() end) end
+        task.delay(0.19,function()
+            if token==_menuAnimToken and not _hubMenuOpen and not Window.Minimized then
+                pcall(function() Window:Minimize() end)
+                root.Position=_menuBasePosition
+            end
         end)
     end
 end
@@ -1350,7 +1463,8 @@ S(Tabs.Destruction,"TelekinesisForce","Telecinese Force",100,3000,1000,function(
 BindButton(Tabs.Destruction,"Telecinese Key",function() return Cfg.Settings.TelekinesisKeyName end,function(k,n) Cfg.Settings.TelekinesisKey=k; Cfg.Settings.TelekinesisKeyName=n end)
 Tabs.Destruction:AddButton({Title="Release Held Target",Callback=function() _TK.Release() end})
 Tabs.Destruction:AddButton({Title="Matar todos (alinhar alvos)",Callback=AlignAllPlayersForTest})
-Tabs.Destruction:AddParagraph({Title="Teste autorizado",Content="Alinha os personagens vivos em frente ao jogador para teste manual. A função não aplica dano automaticamente."})
+Tabs.Destruction:AddButton({Title="Desalinhar jogadores",Callback=function() UnalignAllPlayers(false) end})
+Tabs.Destruction:AddParagraph({Title="Teste autorizado",Content="Alinha os personagens vivos em frente ao jogador e mantém a formação até usar Desalinhar jogadores. A função não aplica dano automaticamente."})
 
 
 Tabs.Vehicles:AddSection("Controle de veículos")
@@ -1371,6 +1485,7 @@ S(Tabs.Misc,"WalkSpeed","WalkSpeed",1,1000,25,function(v) Cfg.Misc.WalkSpeed=v; 
 
 Tabs.Misc:AddSection("Other")
 T(Tabs.Misc,"AntiRag","Anti Ragdoll",function() return Cfg.Misc.AntiRag end,function(v) Cfg.Misc.AntiRag=v end)
+T(Tabs.Misc,"Invisibility","Invisibility",function() return Cfg.Misc.Invisibility end,function(v) Cfg.Misc.Invisibility=v; if v then EnableInvisibility() else DisableInvisibility() end end)
 T(Tabs.Misc,"ClickTP","Click Teleport",function() return Cfg.Misc.ClickTp end,function(v) Cfg.Misc.ClickTp=v end)
 Tabs.Misc:AddSection("Player Teleport")
 Tabs.Misc:AddParagraph({Title="Teleport to player",Content="Carregue a lista, selecione um jogador e use o botão de teleporte."})
@@ -1494,7 +1609,7 @@ SyncGuiFromCfg=function()
         Hitbox=Cfg.Misc.HitboxExtender, HitboxTeamCheck=Cfg.Misc.TeamCheck,
         Fly=Cfg.Misc.Fly, VehicleFly=Cfg.Misc.VehicleFly, VehicleSpeed=Cfg.Misc.VehicleSpeed, VehicleNoclip=Cfg.Misc.VehicleNoclip, Telekinesis=Cfg.Misc.Telekinesis, Noclip=Cfg.Misc.Noclip, Speed=Cfg.Misc.Speed,
         AntiRag=Cfg.Misc.AntiRag, ClickTP=Cfg.Misc.ClickTp,
-        AntiAFK=Cfg.Misc.AntiAFK, BlockGameInput=Cfg.Settings.BlockGameInput,
+        AntiAFK=Cfg.Misc.AntiAFK, Invisibility=Cfg.Misc.Invisibility, BlockGameInput=Cfg.Settings.BlockGameInput,
                 VSync=Cfg.Settings.VSync,
 
     }
@@ -1666,8 +1781,8 @@ T(Tabs.Settings,"VSync","VSync - sync ESP with game FPS",function() return Cfg.S
 local function ShutdownHub()
     if _hubShutdown then return end
     -- Stop every feature first.
-    Cfg.Misc.Fly=false; Cfg.Misc.VehicleFly=false; Cfg.Misc.VehicleSpeed=false; Cfg.Misc.VehicleNoclip=false; Cfg.Misc.Telekinesis=false; Cfg.Misc.Noclip=false; Cfg.Misc.Speed=false; Cfg.Misc.HitboxExtender=false
-    pcall(_TK.Release); pcall(DisableFly); pcall(DisableVehicleFly); pcall(DisableVehicleSpeed); pcall(DisableVehicleNoclip); pcall(DisableNoclip); pcall(ApplySpeed)
+    Cfg.Misc.Fly=false; Cfg.Misc.VehicleFly=false; Cfg.Misc.VehicleSpeed=false; Cfg.Misc.VehicleNoclip=false; Cfg.Misc.Telekinesis=false; Cfg.Misc.Noclip=false; Cfg.Misc.Speed=false; Cfg.Misc.Invisibility=false; Cfg.Misc.HitboxExtender=false
+    pcall(_TK.Release); pcall(DisableFly); pcall(DisableVehicleFly); pcall(DisableVehicleSpeed); pcall(DisableVehicleNoclip); pcall(DisableNoclip); pcall(DisableInvisibility); pcall(UnalignAllPlayers); pcall(ApplySpeed)
     pcall(function() for player in pairs(_hbConns) do SetHitbox(player,false) end end)
     pcall(function() for player,conn in pairs(_hbDescConns) do if conn then conn:Disconnect() end; _hbDescConns[player]=nil end end)
     pcall(function() for player in pairs(_hbOriginals) do RestoreHitbox(player) end end)
