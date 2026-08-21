@@ -174,6 +174,7 @@ Trigger = { Enabled=false, TeamCheck=false, Delay=80, Mode="Semi",
     Misc = {
                 Fly=false, FlySpeed=50, FlyBoost=false,
         VehicleFly=false, VehicleFlySpeed=100,
+        VehicleSpeed=false, VehicleSpeedValue=100, VehicleNoclip=false,
         Telekinesis=false, TelekinesisForce=1000, TelekinesisMode="Hold",
         Noclip=false,
 
@@ -385,15 +386,19 @@ end
 -- VEHICLE FLY
 -- ============================================================
 local _vehicleFlyConn,_vehicleBV,_vehicleBG,_vehiclePart=nil,nil,nil,nil
-local function GetVehiclePart()
+local function GetVehicleModel()
     local char=LP.Character
     local hum=char and char:FindFirstChildOfClass("Humanoid")
     local seat=hum and hum.SeatPart
-    if not seat or not (seat:IsA("Seat") or seat:IsA("VehicleSeat")) then return nil end
+    if not seat or not (seat:IsA("Seat") or seat:IsA("VehicleSeat")) then return nil,nil end
     local model=seat:FindFirstAncestorOfClass("Model")
-    if not model then return nil end
-    if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then return model.PrimaryPart end
-    return model:FindFirstChildWhichIsA("BasePart",true)
+    if not model then return nil,nil end
+    local part=(model.PrimaryPart and model.PrimaryPart:IsA("BasePart")) and model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart",true)
+    return model,part
+end
+local function GetVehiclePart()
+    local _,part=GetVehicleModel()
+    return part
 end
 local function DisableVehicleFly()
     if _vehicleFlyConn then _vehicleFlyConn:Disconnect(); _vehicleFlyConn=nil end
@@ -435,6 +440,62 @@ local function EnableVehicleFly()
         if UIS:IsKeyDown(Enum.KeyCode.LeftShift) then velocity=velocity-Vector3.new(0,speed,0) end
         _vehicleBV.Velocity=velocity
         _vehicleBG.CFrame=CFrame.lookAt(_vehiclePart.Position,_vehiclePart.Position+cf.LookVector)
+    end))
+end
+
+
+-- ============================================================
+-- VEHICLE SPEED / VEHICLE NOCLIP
+-- ============================================================
+local _vehicleSpeedConn=nil
+local function DisableVehicleSpeed()
+    if _vehicleSpeedConn then _vehicleSpeedConn:Disconnect(); _vehicleSpeedConn=nil end
+end
+local function EnableVehicleSpeed()
+    if _vehicleSpeedConn then return end
+    _vehicleSpeedConn=AC(RunService.Heartbeat:Connect(function()
+        if not Cfg.Misc.VehicleSpeed then return end
+        local model,part=GetVehicleModel()
+        if not model or not part or not part.Parent then return end
+        local velocity=part.AssemblyLinearVelocity
+        local horizontal=Vector3.new(velocity.X,0,velocity.Z)
+        if horizontal.Magnitude>0.5 then
+            local speed=math.clamp(tonumber(Cfg.Misc.VehicleSpeedValue) or 100,10,1000)
+            part.AssemblyLinearVelocity=horizontal.Unit*speed+Vector3.new(0,velocity.Y,0)
+        end
+    end))
+end
+
+local _vehicleNoclipConn=nil
+local _vehicleNoclipModel=nil
+local _vehicleNoclipOriginals={}
+local function RestoreVehicleNoclip()
+    for part,canCollide in pairs(_vehicleNoclipOriginals) do
+        if part and part.Parent then pcall(function() part.CanCollide=canCollide end) end
+    end
+    _vehicleNoclipOriginals={}
+    _vehicleNoclipModel=nil
+end
+local function DisableVehicleNoclip()
+    if _vehicleNoclipConn then _vehicleNoclipConn:Disconnect(); _vehicleNoclipConn=nil end
+    RestoreVehicleNoclip()
+end
+local function EnableVehicleNoclip()
+    if _vehicleNoclipConn then return end
+    _vehicleNoclipConn=AC(RunService.Stepped:Connect(function()
+        if not Cfg.Misc.VehicleNoclip then return end
+        local model=GetVehicleModel()
+        if model~=_vehicleNoclipModel then
+            RestoreVehicleNoclip()
+            _vehicleNoclipModel=model
+        end
+        if not model then return end
+        for _,obj in ipairs(model:GetDescendants()) do
+            if obj:IsA("BasePart") then
+                if _vehicleNoclipOriginals[obj]==nil then _vehicleNoclipOriginals[obj]=obj.CanCollide end
+                obj.CanCollide=false
+            end
+        end
     end))
 end
 
@@ -595,6 +656,8 @@ AC(LP.CharacterAdded:Connect(function()
     ApplySpeed()
     if Cfg.Misc.Fly then EnableFly() end
     if Cfg.Misc.Noclip then EnableNoclip() end
+    if Cfg.Misc.VehicleSpeed then EnableVehicleSpeed() end
+    if Cfg.Misc.VehicleNoclip then EnableVehicleNoclip() end
 end))
 
 -- CLICK TELEPORT
@@ -1049,6 +1112,7 @@ end
 
 local Tabs={
     Misc=Window:AddTab({Title="Misc",Icon="settings-2"}),
+    Vehicles=Window:AddTab({Title="Veículos",Icon="car"}),
     Destruction=Window:AddTab({Title="zaralho",Icon="bomb"}),
     Spawn=Window:AddTab({Title="Spawn",Icon="package"}),
     Binds=Window:AddTab({Title="Binds",Icon="keyboard"}),
@@ -1059,6 +1123,7 @@ local Tabs={
 }
 local Options=Fluent.Options
 local _menuAnimToken=0
+local _menuAnimTween=nil
 local _menuAnimScale=Instance.new("UIScale")
 _menuAnimScale.Scale=1
 _menuAnimScale.Parent=Window.Root
@@ -1070,11 +1135,15 @@ local function AnimateMenuVisibility(open)
     if open then
         if Window.Minimized then pcall(function() Window:Minimize() end) end
         root.Visible=true
-        _menuAnimScale.Scale=0.96
-        TweenService:Create(_menuAnimScale,TweenInfo.new(0.18,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{Scale=1}):Play()
+        if _menuAnimTween then pcall(function() _menuAnimTween:Cancel() end) end
+        if _menuAnimScale.Scale>=0.999 then _menuAnimScale.Scale=0.96 end
+        _menuAnimTween=TweenService:Create(_menuAnimScale,TweenInfo.new(0.18,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{Scale=1})
+        _menuAnimTween:Play()
     else
         root.Visible=true
-        TweenService:Create(_menuAnimScale,TweenInfo.new(0.16,Enum.EasingStyle.Quad,Enum.EasingDirection.In),{Scale=0.96}):Play()
+        if _menuAnimTween then pcall(function() _menuAnimTween:Cancel() end) end
+        _menuAnimTween=TweenService:Create(_menuAnimScale,TweenInfo.new(0.16,Enum.EasingStyle.Quad,Enum.EasingDirection.In),{Scale=0.96})
+        _menuAnimTween:Play()
         task.delay(0.17,function()
             if token==_menuAnimToken and not _hubMenuOpen and not Window.Minimized then pcall(function() Window:Minimize() end) end
         end)
@@ -1186,11 +1255,19 @@ S(Tabs.Destruction,"TelekinesisForce","Telecinese Force",100,3000,1000,function(
 BindButton(Tabs.Destruction,"Telecinese Key",function() return Cfg.Settings.TelekinesisKeyName end,function(k,n) Cfg.Settings.TelekinesisKey=k; Cfg.Settings.TelekinesisKeyName=n end)
 Tabs.Destruction:AddButton({Title="Release Held Target",Callback=function() _TK.Release() end})
 
+
+Tabs.Vehicles:AddSection("Controle de veículos")
+Tabs.Vehicles:AddParagraph({Title="Requisitos",Content="Sente-se em um veículo antes de ativar qualquer função. O Vehicle Fly usa W/A/S/D, Space para subir e Shift Esquerdo para descer."})
+T(Tabs.Vehicles,"VehicleFly","Vehicle Fly",function() return Cfg.Misc.VehicleFly end,function(v) Cfg.Misc.VehicleFly=v; if v then EnableVehicleFly() else DisableVehicleFly() end end)
+S(Tabs.Vehicles,"VehicleFlySpeed","Vehicle Fly Speed",25,1000,100,function(v) Cfg.Misc.VehicleFlySpeed=v end)
+T(Tabs.Vehicles,"VehicleSpeed","Vehicle Speed",function() return Cfg.Misc.VehicleSpeed end,function(v) Cfg.Misc.VehicleSpeed=v; if v then EnableVehicleSpeed() else DisableVehicleSpeed() end end)
+S(Tabs.Vehicles,"VehicleSpeedValue","Vehicle Speed Value",10,1000,100,function(v) Cfg.Misc.VehicleSpeedValue=math.clamp(tonumber(v) or 100,10,1000) end)
+T(Tabs.Vehicles,"VehicleNoclip","Vehicle Noclip",function() return Cfg.Misc.VehicleNoclip end,function(v) Cfg.Misc.VehicleNoclip=v; if v then EnableVehicleNoclip() else DisableVehicleNoclip() end end)
+Tabs.Vehicles:AddParagraph({Title="Vehicle Noclip",Content="Desativa a colisão das partes do veículo atual. Ao desligar ou trocar de veículo, as colisões originais são restauradas."})
+
 Tabs.Misc:AddSection("Movement")
 T(Tabs.Misc,"Fly","Fly",function() return Cfg.Misc.Fly end,function(v) Cfg.Misc.Fly=v; if v then EnableFly() else DisableFly() end end)
 S(Tabs.Misc,"FlySpeed","Fly Speed",1,500,50,function(v) Cfg.Misc.FlySpeed=v end)
-T(Tabs.Misc,"VehicleFly","Vehicle Fly",function() return Cfg.Misc.VehicleFly end,function(v) Cfg.Misc.VehicleFly=v; if v then EnableVehicleFly() else DisableVehicleFly() end end)
-S(Tabs.Misc,"VehicleFlySpeed","Vehicle Fly Speed",25,1000,100,function(v) Cfg.Misc.VehicleFlySpeed=v end)
 T(Tabs.Misc,"Noclip","Noclip",function() return Cfg.Misc.Noclip end,function(v) Cfg.Misc.Noclip=v; if v then EnableNoclip() else DisableNoclip() end end)
 T(Tabs.Misc,"Speed","Speedhack",function() return Cfg.Misc.Speed end,function(v) Cfg.Misc.Speed=v; ApplySpeed() end)
 S(Tabs.Misc,"WalkSpeed","WalkSpeed",1,1000,25,function(v) Cfg.Misc.WalkSpeed=v; if Cfg.Misc.Speed then ApplySpeed() end end)
@@ -1318,7 +1395,7 @@ SyncGuiFromCfg=function()
         HeldTool=Cfg.ESP.HeldTool, Aimbot=Cfg.Aim.Aimbot, ShowFOV=Cfg.Aim.ShowFOV,
         UseFOV=Cfg.Aim.UseFOV, CameraFollow=Cfg.Aim.CameraFollow, Trigger=Cfg.Trigger.Enabled, TriggerTeam=Cfg.Trigger.TeamCheck,
         Hitbox=Cfg.Misc.HitboxExtender, HitboxTeamCheck=Cfg.Misc.TeamCheck,
-        Fly=Cfg.Misc.Fly, VehicleFly=Cfg.Misc.VehicleFly, Telekinesis=Cfg.Misc.Telekinesis, Noclip=Cfg.Misc.Noclip, Speed=Cfg.Misc.Speed,
+        Fly=Cfg.Misc.Fly, VehicleFly=Cfg.Misc.VehicleFly, VehicleSpeed=Cfg.Misc.VehicleSpeed, VehicleNoclip=Cfg.Misc.VehicleNoclip, Telekinesis=Cfg.Misc.Telekinesis, Noclip=Cfg.Misc.Noclip, Speed=Cfg.Misc.Speed,
         AntiRag=Cfg.Misc.AntiRag, ClickTP=Cfg.Misc.ClickTp,
         AntiAFK=Cfg.Misc.AntiAFK, BlockGameInput=Cfg.Settings.BlockGameInput,
                 VSync=Cfg.Settings.VSync,
@@ -1330,7 +1407,7 @@ SyncGuiFromCfg=function()
         PredStrength=Cfg.Aim.PredStr, Smooth=Cfg.Aim.Smoothness, AimStrength=Cfg.Aim.AimStrength,
         FOVSize=Cfg.Aim.FOV, AimMaxDistance=Cfg.Aim.MaxDistance, TriggerDelay=Cfg.Trigger.Delay,
         HitboxSize=Cfg.Misc.HitboxSize, MaxDistance=Cfg.ESP.MaxDist,
-                ESPUpdateRate=Cfg.ESP.UpdateRate, FlySpeed=Cfg.Misc.FlySpeed, VehicleFlySpeed=Cfg.Misc.VehicleFlySpeed,
+                ESPUpdateRate=Cfg.ESP.UpdateRate, FlySpeed=Cfg.Misc.FlySpeed, VehicleFlySpeed=Cfg.Misc.VehicleFlySpeed, VehicleSpeedValue=Cfg.Misc.VehicleSpeedValue,
         TelekinesisForce=Cfg.Misc.TelekinesisForce,
         
         WindowWidth=Cfg.Settings.WindowWidth, WindowHeight=Cfg.Settings.WindowHeight,
@@ -1492,8 +1569,8 @@ T(Tabs.Settings,"VSync","VSync - sync ESP with game FPS",function() return Cfg.S
 local function ShutdownHub()
     if _hubShutdown then return end
     -- Stop every feature first.
-    Cfg.Misc.Fly=false; Cfg.Misc.VehicleFly=false; Cfg.Misc.Telekinesis=false; Cfg.Misc.Noclip=false; Cfg.Misc.Speed=false; Cfg.Misc.HitboxExtender=false
-    pcall(_TK.Release); pcall(DisableFly); pcall(DisableVehicleFly); pcall(DisableNoclip); pcall(ApplySpeed)
+    Cfg.Misc.Fly=false; Cfg.Misc.VehicleFly=false; Cfg.Misc.VehicleSpeed=false; Cfg.Misc.VehicleNoclip=false; Cfg.Misc.Telekinesis=false; Cfg.Misc.Noclip=false; Cfg.Misc.Speed=false; Cfg.Misc.HitboxExtender=false
+    pcall(_TK.Release); pcall(DisableFly); pcall(DisableVehicleFly); pcall(DisableVehicleSpeed); pcall(DisableVehicleNoclip); pcall(DisableNoclip); pcall(ApplySpeed)
     pcall(function() for player in pairs(_hbConns) do SetHitbox(player,false) end end)
     pcall(function() for player,conn in pairs(_hbDescConns) do if conn then conn:Disconnect() end; _hbDescConns[player]=nil end end)
     pcall(function() for player in pairs(_hbOriginals) do RestoreHitbox(player) end end)
