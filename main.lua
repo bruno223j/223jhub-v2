@@ -190,7 +190,7 @@ Trigger = { Enabled=false, TeamCheck=false, Delay=80, Mode="Semi",
         NoclipKey=Enum.KeyCode.F6,   NoclipKeyName="F6",
 SpeedKey=Enum.KeyCode.F7,    SpeedKeyName="F7",
         ClickTpKey=Enum.KeyCode.F8, ClickTpKeyName="F8",
-        TelekinesisKey=Enum.KeyCode.Y, TelekinesisKeyName="Y",
+        TelekinesisKey=Enum.KeyCode.F10, TelekinesisKeyName="F10",
         ToggleKeyName="Mouse3",
         BlockGameInput=false, VSync=true,
         ThemePreset="Dark",
@@ -305,7 +305,7 @@ local function ApplySave(t)
     Cfg.Settings.NoclipKey=TK(Cfg.Settings.NoclipKeyName,KeepBind(Cfg.Settings.NoclipKey,Enum.KeyCode.F6))
     Cfg.Settings.SpeedKey=TK(Cfg.Settings.SpeedKeyName,KeepBind(Cfg.Settings.SpeedKey,Enum.KeyCode.F7))
         Cfg.Settings.ClickTpKey=TK(Cfg.Settings.ClickTpKeyName,KeepBind(Cfg.Settings.ClickTpKey,Enum.KeyCode.F8))
-    Cfg.Settings.TelekinesisKey=TK(Cfg.Settings.TelekinesisKeyName,KeepBind(Cfg.Settings.TelekinesisKey,Enum.KeyCode.Y))
+    Cfg.Settings.TelekinesisKey=TK(Cfg.Settings.TelekinesisKeyName,KeepBind(Cfg.Settings.TelekinesisKey,Enum.KeyCode.F10))
     Cfg.ESP.UpdateRate=math.clamp(tonumber(Cfg.ESP.UpdateRate) or 30,1,60)
     _espInterval=1/Cfg.ESP.UpdateRate
     if SyncGuiFromCfg then pcall(SyncGuiFromCfg) end
@@ -2183,7 +2183,7 @@ Tabs.Binds:AddButton({Title="Clear All Binds",Callback=function()
     Cfg.Settings.NoclipKey,Cfg.Settings.NoclipKeyName=Enum.KeyCode.F6,"F6"
     Cfg.Settings.SpeedKey,Cfg.Settings.SpeedKeyName=Enum.KeyCode.F7,"F7"
     Cfg.Settings.ClickTpKey,Cfg.Settings.ClickTpKeyName=Enum.KeyCode.F8,"F8"
-    Cfg.Settings.TelekinesisKey,Cfg.Settings.TelekinesisKeyName=Enum.KeyCode.Y,"Y"
+    Cfg.Settings.TelekinesisKey,Cfg.Settings.TelekinesisKeyName=Enum.KeyCode.F10,"F10"
     Cfg.Aim.AimKey,Cfg.Aim.AimKeyName=Enum.KeyCode.E,"E"
     for title,entry in pairs(_bindButtons) do SetBindButtonTitle(entry,title..": ["..tostring(entry.GetName() or "None").."]",title) end
     UpdateVisibleText("Aim Lock Bind: [",AimBindLabel())
