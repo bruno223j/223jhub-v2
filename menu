@@ -1033,8 +1033,6 @@ local function AddIdentityCard(window,accent)
     username.BackgroundTransparency=1; username.Position=UDim2.fromOffset(52,26); username.Size=UDim2.fromOffset(86,16); username.Font=Enum.Font.Gotham; username.TextSize=10; username.TextColor3=Color3.fromRGB(170,170,178); username.TextXAlignment=Enum.TextXAlignment.Left; username.TextTruncate=Enum.TextTruncate.AtEnd; username.Text="@"..LP.Name; username.ZIndex=51; username.Parent=card
     return card
 end
-AddIdentityCard(Window,Color3.fromRGB(70,150,220))
-
 -- Mantém o dropdown como popup independente, com altura limitada e reposicionamento automático conforme o espaço disponível.
 _fluentSource=_fluentSource:gsub("BackgroundTransparency=1,Size=UDim2.new(1,0,0,300),Position=UDim2.fromOffset(0,42),Parent=m.Frame,Visible=false","BackgroundTransparency=1,Size=UDim2.fromOffset(170,300),Parent=h.Library.GUI,Visible=false")
 _fluentSource=_fluentSource:gsub("local w,x=function()v.Position=UDim2.fromOffset(0,42)end,0","local w,x=function()local w=0 if ai.ViewportSize.Y-p.AbsolutePosition.Y<v.AbsoluteSize.Y-5 then w=v.AbsoluteSize.Y-5-(ai.ViewportSize.Y-p.AbsolutePosition.Y)+40 end v.Position=UDim2.fromOffset(p.AbsolutePosition.X-1,p.AbsolutePosition.Y-5-w)end,0")
@@ -1090,8 +1088,7 @@ end
 _TK.HoldPosition=function()
     local char=LP.Character
     local root=char and char:FindFirstChild("HumanoidRootPart")
-    local head=char and char:FindFirstChild("Head")
-    return head and head.Position+Cam.CFrame.LookVector*2+Vector3.new(0,3,0) or (root and root.Position+Vector3.new(0,10,0) or nil)
+    return root and root.Position+Vector3.new(0,10,0) or nil
 end
 _TK.Direction=function()
     local direction=Cam.CFrame.LookVector+Vector3.new(0,0.35,0)
@@ -1134,14 +1131,13 @@ _TK.Hold=function(kind,model,root)
     local bodyPosition=Instance.new("BodyPosition")
     bodyPosition.Name="223TelekinesisHold"
     bodyPosition.MaxForce=Vector3.new(1e9,1e9,1e9)
-    bodyPosition.P=250000; bodyPosition.D=12000
-    bodyPosition.MaxVelocity=100000
+    bodyPosition.P=100000; bodyPosition.D=6000
     bodyPosition.Position=_TK.HoldPosition() or root.Position
     bodyPosition.Parent=root
     local bodyGyro=Instance.new("BodyGyro")
     bodyGyro.Name="223TelekinesisRotation"
     bodyGyro.MaxTorque=Vector3.new(1e9,1e9,1e9)
-    bodyGyro.P=120000; bodyGyro.D=10000
+    bodyGyro.P=50000; bodyGyro.D=5000
     bodyGyro.CFrame=_TK.StableHoldCFrame(bodyPosition.Position)
     bodyGyro.Parent=root
     local collisionOriginals={}
@@ -1158,7 +1154,6 @@ _TK.Hold=function(kind,model,root)
         local held=_TK.Held
         local holdPosition=_TK.HoldPosition()
         if not held or not holdPosition or not held.root or not held.root.Parent or held.root.Anchored or (held.model and not held.model.Parent) then _TK.Release(); return end
-        if held.model and not held.model:IsDescendantOf(Workspace) then _TK.Release(); return end
         pcall(function()
             local holdCFrame=_TK.StableHoldCFrame(holdPosition)
             held.bodyPosition.Position=holdPosition
@@ -1205,17 +1200,41 @@ _TK.Action=function()
     if Cfg.Misc.TelekinesisMode=="Direct" then _TK.ThrowCursor(); return end
     local _,model,root=_TK.FindTarget()
     if not root then
-        task.defer(function()
-            local _,retryModel,retryRoot=_TK.FindTarget()
-            if retryRoot and Cfg.Misc.Telekinesis then
-                if _TK.Hold("Vehicle",retryModel,retryRoot) then Fluent:Notify({Title="Telecinese",Content="Veículo segurado acima de você. Clique para lançar.",Duration=2}) end
-            else
-                Fluent:Notify({Title="Telecinese",Content="Aponte o cursor para um veículo antes de segurar.",Duration=2})
-            end
-        end)
+        Fluent:Notify({Title="Telecinese",Content="Aponte o cursor para um veículo antes de segurar.",Duration=2})
         return
     end
     if _TK.Hold("Vehicle",model,root) then Fluent:Notify({Title="Telecinese",Content="Veículo segurado acima de você. Clique para lançar.",Duration=2}) end
+end
+
+local function AlignAllPlayersForTest()
+    local char=LP.Character
+    local root=char and char:FindFirstChild("HumanoidRootPart")
+    if not root then
+        Fluent:Notify({Title="Matar todos",Content="Seu personagem ainda não está pronto.",Duration=2})
+        return
+    end
+    local forward=Vector3.new(Cam.CFrame.LookVector.X,0,Cam.CFrame.LookVector.Z)
+    if forward.Magnitude<0.01 then forward=Vector3.new(0,0,-1) end
+    forward=forward.Unit
+    local right=Vector3.new(-forward.Z,0,forward.X)
+    local targets={}
+    for _,player in ipairs(Players:GetPlayers()) do
+        if player~=LP and player.Character and player.Character.Parent then
+            local hum=player.Character:FindFirstChildOfClass("Humanoid")
+            local head=player.Character:FindFirstChild("Head")
+            if hum and hum.Health>0 and head then targets[#targets+1]=player end
+        end
+    end
+    local center=root.Position+forward*22+Vector3.new(0,0.5,0)
+    for index,player in ipairs(targets) do
+        local offset=(index-(#targets+1)/2)*4
+        local position=center+right*offset
+        local targetChar=player.Character
+        pcall(function()
+            targetChar:PivotTo(CFrame.lookAt(position,root.Position,Vector3.yAxis))
+        end)
+    end
+    Fluent:Notify({Title="Matar todos",Content=(#targets>0 and ("Alvos alinhados: "..#targets) or "Nenhum alvo vivo encontrado."),Duration=3})
 end
 
 local _alignedTargets={}
@@ -1343,6 +1362,7 @@ local Tabs={
     Credits=Window:AddTab({Title="Credits",Icon="heart"})
 }
 local Options=Fluent.Options
+AddIdentityCard(Window,Color3.fromRGB(70,150,220))
 local _menuAnimToken=0
 local _menuAnimTween=nil
 local _menuBasePosition=Window.Root.Position
