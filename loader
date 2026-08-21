@@ -153,7 +153,7 @@ local Cfg = {
         BoxColor=Color3.fromRGB(220,40,40), FillColor=Color3.fromRGB(220,40,40),
         NameColor=Color3.fromRGB(255,255,255), TracerColor=Color3.fromRGB(220,40,40),
         DistColor=Color3.fromRGB(200,200,200),
-        HPBgColor=Color3.fromRGB(60,0,0), ToolColor=Color3.fromRGB(255,210,50),
+        HPBgColor=Color3.fromRGB(0,70,0), ToolColor=Color3.fromRGB(255,210,50),
         Skeleton=false, SkelColor=Color3.fromRGB(0,220,255), Mode="Default (Universal)",
                 UpdateRate=30, RadarEnabled=false, RadarTarget="", RadarTargets={}, RadarHighlight=false, RadarColorName="Yellow", ESPColorName="Red",
 
@@ -559,7 +559,7 @@ local function MakeESP(p)
     d.Fill=ND("Square",{Filled=true,Color=Cfg.ESP.FillColor,Transparency=0.7,Thickness=0,Visible=false})
     d.Name=ND("Text",{Size=14,Color=Cfg.ESP.NameColor,Outline=true,OutlineColor=Color3.new(0,0,0),Center=true,Visible=false})
     d.Dist=ND("Text",{Size=12,Color=Cfg.ESP.DistColor,Outline=true,OutlineColor=Color3.new(0,0,0),Center=true,Visible=false})
-    d.HPBg=ND("Square",{Filled=true,Color=Cfg.ESP.HPBgColor,Transparency=0.7,Thickness=0,Visible=false})
+    d.HPBg=ND("Square",{Filled=true,Color=Color3.fromRGB(0,70,0),Transparency=0.7,Thickness=0,Visible=false})
     d.HPBar=ND("Square",{Filled=true,Color=Color3.fromRGB(0,255,0),Transparency=0,Thickness=0,Visible=false})
     d.Tracer=ND("Line",{Thickness=1.5,Color=Cfg.ESP.TracerColor,Transparency=0.7,Visible=false})
     d.Tool=ND("Text",{Size=12,Color=Cfg.ESP.ToolColor,Outline=true,OutlineColor=Color3.new(0,0,0),Center=true,Visible=false})
@@ -966,8 +966,17 @@ AC(RunService.RenderStepped:Connect(function(dt)
     end
     _loaderESPWasVisible=true
     local now=os.clock()
-    local syncInterval=Cfg.Settings.VSync and math.max(tonumber(dt) or 1/60,1/240) or _espInterval
-    
+    local frameDt=math.clamp(tonumber(dt) or 1/60,1/240,0.25)
+    local estimatedFps=1/frameDt
+    local syncInterval
+    if Cfg.Settings.VSync then
+        -- Margem de cinco FPS sobre o frame atual, sem tentar criar uma
+        -- segunda atualização concorrente fora do RenderStepped.
+        local targetFps=math.min(estimatedFps+5,240)
+        syncInterval=math.max(1/targetFps,1/240)
+    else
+        syncInterval=_espInterval
+    end
     if now-_espLastUpdate<syncInterval then
         return
     end
@@ -1009,7 +1018,7 @@ AC(RunService.RenderStepped:Connect(function(dt)
             if Cfg.ESP.Dist then SafeSet(d.Dist,{Position=Vector2.new(x+w/2,y+h+4),Text=math.floor(dist).."m",Color=Cfg.ESP.DistColor,Visible=true}) else SafeHide(d.Dist) end
             if Cfg.ESP.HP then
                 local hp,mhp=GetHP(char); local ratio=math.clamp(hp/math.max(mhp,1),0,1); local barH=h*ratio
-                SafeSet(d.HPBg,{Position=Vector2.new(x-7,y),Size=Vector2.new(5,h),Color=Cfg.ESP.HPBgColor,Transparency=0.7,Visible=true})
+                SafeSet(d.HPBg,{Position=Vector2.new(x-7,y),Size=Vector2.new(5,h),Color=Color3.fromRGB(0,70,0),Transparency=0.7,Visible=true})
                 SafeSet(d.HPBar,{Position=Vector2.new(x-7,y+h-barH),Size=Vector2.new(5,barH),Color=Color3.fromRGB(0,255,0),Transparency=0,Visible=true})
             else SafeHide(d.HPBg); SafeHide(d.HPBar) end
             if Cfg.ESP.Tracers then SafeSet(d.Tracer,{From=Vector2.new(cx,vsY),To=Vector2.new(x+w/2,y+h),Color=tracerColor,Transparency=0.7,Visible=true}) else SafeHide(d.Tracer) end
