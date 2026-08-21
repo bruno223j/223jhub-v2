@@ -26,6 +26,7 @@ function _223HUB_MAIN()
 local Players         = game:GetService("Players")
 local RunService      = game:GetService("RunService")
 local TweenService    = game:GetService("TweenService")
+local PhysicsService  = game:GetService("PhysicsService")
 local UIS             = game:GetService("UserInputService")
 local _mouseHeld={}
 local _M3,_M4,_M5
@@ -394,7 +395,7 @@ local function GetVehicleModel()
     local model=seat:FindFirstAncestorOfClass("Model")
     if not model then return nil,nil end
     local part=(model.PrimaryPart and model.PrimaryPart:IsA("BasePart")) and model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart",true)
-    return model,part
+    return model,part,seat
 end
 local function GetVehiclePart()
     local _,part=GetVehicleModel()
@@ -431,15 +432,24 @@ local function EnableVehicleFly()
         end
         local cf=Cam.CFrame
         local speed=tonumber(Cfg.Misc.VehicleFlySpeed) or 100
+        local forward=Vector3.new(cf.LookVector.X,0,cf.LookVector.Z)
+        if forward.Magnitude<0.01 then
+            local current=_vehiclePart.CFrame.LookVector
+            forward=Vector3.new(current.X,0,current.Z)
+        end
+        if forward.Magnitude<0.01 then forward=Vector3.new(0,0,-1) end
+        forward=forward.Unit
+        local right=Vector3.new(-forward.Z,0,forward.X)
         local velocity=Vector3.zero
-        if UIS:IsKeyDown(Enum.KeyCode.W) then velocity=velocity+cf.LookVector*speed end
-        if UIS:IsKeyDown(Enum.KeyCode.S) then velocity=velocity-cf.LookVector*speed end
-        if UIS:IsKeyDown(Enum.KeyCode.A) then velocity=velocity-cf.RightVector*speed end
-        if UIS:IsKeyDown(Enum.KeyCode.D) then velocity=velocity+cf.RightVector*speed end
+        if UIS:IsKeyDown(Enum.KeyCode.W) then velocity=velocity+forward*speed end
+        if UIS:IsKeyDown(Enum.KeyCode.S) then velocity=velocity-forward*speed end
+        if UIS:IsKeyDown(Enum.KeyCode.A) then velocity=velocity-right*speed end
+        if UIS:IsKeyDown(Enum.KeyCode.D) then velocity=velocity+right*speed end
         if UIS:IsKeyDown(Enum.KeyCode.Space) then velocity=velocity+Vector3.new(0,speed,0) end
         if UIS:IsKeyDown(Enum.KeyCode.LeftShift) then velocity=velocity-Vector3.new(0,speed,0) end
         _vehicleBV.Velocity=velocity
-        _vehicleBG.CFrame=CFrame.lookAt(_vehiclePart.Position,_vehiclePart.Position+cf.LookVector)
+        -- Mantém o veículo nivelado, como se estivesse dirigindo, sem inclinação da câmera.
+        _vehicleBG.CFrame=CFrame.lookAt(_vehiclePart.Position,_vehiclePart.Position+forward,Vector3.yAxis)
     end))
 end
 
@@ -448,20 +458,37 @@ end
 -- VEHICLE SPEED / VEHICLE NOCLIP
 -- ============================================================
 local _vehicleSpeedConn=nil
+local _vehicleSpeedSeat=nil
+local _vehicleSpeedOriginalMax=nil
+local function RestoreVehicleSpeed()
+    if _vehicleSpeedSeat and _vehicleSpeedSeat.Parent and _vehicleSpeedOriginalMax~=nil then
+        pcall(function() _vehicleSpeedSeat.MaxSpeed=_vehicleSpeedOriginalMax end)
+    end
+    _vehicleSpeedSeat=nil
+    _vehicleSpeedOriginalMax=nil
+end
 local function DisableVehicleSpeed()
     if _vehicleSpeedConn then _vehicleSpeedConn:Disconnect(); _vehicleSpeedConn=nil end
+    RestoreVehicleSpeed()
 end
 local function EnableVehicleSpeed()
     if _vehicleSpeedConn then return end
     _vehicleSpeedConn=AC(RunService.Heartbeat:Connect(function()
         if not Cfg.Misc.VehicleSpeed then return end
-        local model,part=GetVehicleModel()
-        if not model or not part or not part.Parent then return end
-        local velocity=part.AssemblyLinearVelocity
-        local horizontal=Vector3.new(velocity.X,0,velocity.Z)
-        if horizontal.Magnitude>0.5 then
-            local speed=math.clamp(tonumber(Cfg.Misc.VehicleSpeedValue) or 100,10,1000)
-            part.AssemblyLinearVelocity=horizontal.Unit*speed+Vector3.new(0,velocity.Y,0)
+        local model,part,seat=GetVehicleModel()
+        if not model or not part or not part.Parent or not seat then
+            RestoreVehicleSpeed()
+            return
+        end
+        if seat:IsA("VehicleSeat") then
+            if seat~=_vehicleSpeedSeat then
+                RestoreVehicleSpeed()
+                _vehicleSpeedSeat=seat
+                _vehicleSpeedOriginalMax=seat.MaxSpeed
+            end
+            local desired=math.clamp(tonumber(Cfg.Misc.VehicleSpeedValue) or 100,10,1000)
+            -- MaxSpeed altera o limite e deixa a aceleração/fricção nativas do veículo funcionarem.
+            pcall(function() seat.MaxSpeed=desired end)
         end
     end))
 end
@@ -469,9 +496,29 @@ end
 local _vehicleNoclipConn=nil
 local _vehicleNoclipModel=nil
 local _vehicleNoclipOriginals={}
+local _vehicleNoclipGroup="223JVehicleNoclip"
+local function EnsureVehicleNoclipGroup()
+    local ok=pcall(function()
+        if not PhysicsService:IsCollisionGroupRegistered(_vehicleNoclipGroup) then
+            PhysicsService:RegisterCollisionGroup(_vehicleNoclipGroup)
+        end
+        for _,info in ipairs(PhysicsService:GetRegisteredCollisionGroups()) do
+            if info.name~=_vehicleNoclipGroup then
+                PhysicsService:CollisionGroupSetCollidable(_vehicleNoclipGroup,info.name,false)
+            end
+        end
+        PhysicsService:CollisionGroupSetCollidable(_vehicleNoclipGroup,_vehicleNoclipGroup,false)
+    end)
+    return ok
+end
 local function RestoreVehicleNoclip()
-    for part,canCollide in pairs(_vehicleNoclipOriginals) do
-        if part and part.Parent then pcall(function() part.CanCollide=canCollide end) end
+    for part,state in pairs(_vehicleNoclipOriginals) do
+        if part and part.Parent then
+            pcall(function()
+                if state.CollisionGroup then part.CollisionGroup=state.CollisionGroup end
+                if state.CanCollide~=nil then part.CanCollide=state.CanCollide end
+            end)
+        end
     end
     _vehicleNoclipOriginals={}
     _vehicleNoclipModel=nil
@@ -482,6 +529,7 @@ local function DisableVehicleNoclip()
 end
 local function EnableVehicleNoclip()
     if _vehicleNoclipConn then return end
+    local groupReady=EnsureVehicleNoclipGroup()
     _vehicleNoclipConn=AC(RunService.Stepped:Connect(function()
         if not Cfg.Misc.VehicleNoclip then return end
         local model=GetVehicleModel()
@@ -492,8 +540,15 @@ local function EnableVehicleNoclip()
         if not model then return end
         for _,obj in ipairs(model:GetDescendants()) do
             if obj:IsA("BasePart") then
-                if _vehicleNoclipOriginals[obj]==nil then _vehicleNoclipOriginals[obj]=obj.CanCollide end
-                obj.CanCollide=false
+                if _vehicleNoclipOriginals[obj]==nil then
+                    _vehicleNoclipOriginals[obj]={CollisionGroup=obj.CollisionGroup,CanCollide=obj.CanCollide}
+                end
+                if groupReady then
+                    pcall(function() obj.CollisionGroup=_vehicleNoclipGroup end)
+                else
+                    -- Fallback somente se o executor não permitir CollisionGroup.
+                    pcall(function() obj.CanCollide=false end)
+                end
             end
         end
     end))
@@ -941,12 +996,17 @@ end
 _TK.HoldPosition=function()
     local char=LP.Character
     local root=char and char:FindFirstChild("HumanoidRootPart")
-    return root and root.Position+Vector3.new(0,8,0) or nil
+    return root and root.Position+Vector3.new(0,10,0) or nil
 end
 _TK.Direction=function()
     local direction=Cam.CFrame.LookVector+Vector3.new(0,0.35,0)
     if direction.Magnitude<0.001 then direction=Vector3.new(0,1,0) end
     return direction.Unit
+end
+_TK.StableHoldCFrame=function(position)
+    local look=Vector3.new(Cam.CFrame.LookVector.X,0,Cam.CFrame.LookVector.Z)
+    if look.Magnitude<0.01 then look=Vector3.new(0,0,-1) end
+    return CFrame.lookAt(position,position+look.Unit,Vector3.yAxis)
 end
 _TK.Impulse=function(root,model)
     if not root or not root.Parent or root.Anchored then return false end
@@ -958,13 +1018,6 @@ _TK.Impulse=function(root,model)
         root:ApplyImpulse(direction*mass*force)
         root.AssemblyLinearVelocity=direction*force
         root.AssemblyAngularVelocity=Cam.CFrame.RightVector*math.clamp(force*0.15,20,450)
-        if model then
-            for _,obj in ipairs(model:GetDescendants()) do
-                if obj:IsA("BasePart") and not obj.Anchored and obj~=root then
-                    obj.AssemblyLinearVelocity=direction*force
-                end
-            end
-        end
     end)
 end
 _TK.Release=function()
@@ -974,6 +1027,9 @@ _TK.Release=function()
     if held then
         if held.bodyPosition then pcall(function() held.bodyPosition:Destroy() end) end
         if held.bodyGyro then pcall(function() held.bodyGyro:Destroy() end) end
+        for part,canCollide in pairs(held.collisionOriginals or {}) do
+            if part and part.Parent then pcall(function() part.CanCollide=canCollide end) end
+        end
     end
 end
 _TK.Hold=function(kind,model,root)
@@ -983,26 +1039,33 @@ _TK.Hold=function(kind,model,root)
     local bodyPosition=Instance.new("BodyPosition")
     bodyPosition.Name="223TelekinesisHold"
     bodyPosition.MaxForce=Vector3.new(1e9,1e9,1e9)
-    bodyPosition.P=50000; bodyPosition.D=1500
+    bodyPosition.P=100000; bodyPosition.D=6000
     bodyPosition.Position=_TK.HoldPosition() or root.Position
     bodyPosition.Parent=root
     local bodyGyro=Instance.new("BodyGyro")
     bodyGyro.Name="223TelekinesisRotation"
     bodyGyro.MaxTorque=Vector3.new(1e9,1e9,1e9)
-    bodyGyro.P=30000; bodyGyro.D=1000
-    bodyGyro.CFrame=CFrame.lookAt(bodyPosition.Position,bodyPosition.Position+Cam.CFrame.LookVector)
+    bodyGyro.P=50000; bodyGyro.D=5000
+    bodyGyro.CFrame=_TK.StableHoldCFrame(bodyPosition.Position)
     bodyGyro.Parent=root
-    _TK.Held={kind=kind,model=model,root=root,bodyPosition=bodyPosition,bodyGyro=bodyGyro}
+    local collisionOriginals={}
+    if model then
+        for _,obj in ipairs(model:GetDescendants()) do
+            if obj:IsA("BasePart") then
+                collisionOriginals[obj]=obj.CanCollide
+                pcall(function() obj.CanCollide=false end)
+            end
+        end
+    end
+    _TK.Held={kind=kind,model=model,root=root,bodyPosition=bodyPosition,bodyGyro=bodyGyro,collisionOriginals=collisionOriginals}
     _TK.HoldConn=AC(RunService.RenderStepped:Connect(function()
         local held=_TK.Held
         local holdPosition=_TK.HoldPosition()
         if not held or not holdPosition or not held.root or not held.root.Parent or held.root.Anchored or (held.model and not held.model.Parent) then _TK.Release(); return end
         pcall(function()
-            local holdCFrame=CFrame.lookAt(holdPosition,holdPosition+Cam.CFrame.LookVector)
+            local holdCFrame=_TK.StableHoldCFrame(holdPosition)
             held.bodyPosition.Position=holdPosition
             held.bodyGyro.CFrame=holdCFrame
-            held.root.CFrame=holdCFrame
-            if held.model then pcall(function() held.model:PivotTo(holdCFrame) end) end
             held.root.AssemblyLinearVelocity=Vector3.zero
             held.root.AssemblyAngularVelocity=Vector3.zero
         end)
@@ -1050,6 +1113,38 @@ _TK.Action=function()
     end
     if _TK.Hold("Vehicle",model,root) then Fluent:Notify({Title="Telecinese",Content="Veículo segurado acima de você. Clique para lançar.",Duration=2}) end
 end
+
+local function AlignAllPlayersForTest()
+    local char=LP.Character
+    local root=char and char:FindFirstChild("HumanoidRootPart")
+    if not root then
+        Fluent:Notify({Title="Matar todos",Content="Seu personagem ainda não está pronto.",Duration=2})
+        return
+    end
+    local forward=Vector3.new(Cam.CFrame.LookVector.X,0,Cam.CFrame.LookVector.Z)
+    if forward.Magnitude<0.01 then forward=Vector3.new(0,0,-1) end
+    forward=forward.Unit
+    local right=Vector3.new(-forward.Z,0,forward.X)
+    local targets={}
+    for _,player in ipairs(Players:GetPlayers()) do
+        if player~=LP and player.Character and player.Character.Parent then
+            local hum=player.Character:FindFirstChildOfClass("Humanoid")
+            local head=player.Character:FindFirstChild("Head")
+            if hum and hum.Health>0 and head then targets[#targets+1]=player end
+        end
+    end
+    local center=root.Position+forward*22+Vector3.new(0,0.5,0)
+    for index,player in ipairs(targets) do
+        local offset=(index-(#targets+1)/2)*4
+        local position=center+right*offset
+        local targetChar=player.Character
+        pcall(function()
+            targetChar:PivotTo(CFrame.lookAt(position,root.Position,Vector3.yAxis))
+        end)
+    end
+    Fluent:Notify({Title="Matar todos",Content=(#targets>0 and ("Alvos alinhados: "..#targets) or "Nenhum alvo vivo encontrado."),Duration=3})
+end
+
 AC(LP.CharacterRemoving:Connect(function()
     _TK.Release()
 end))
@@ -1136,15 +1231,15 @@ local function AnimateMenuVisibility(open)
         if Window.Minimized then pcall(function() Window:Minimize() end) end
         root.Visible=true
         if _menuAnimTween then pcall(function() _menuAnimTween:Cancel() end) end
-        if _menuAnimScale.Scale>=0.999 then _menuAnimScale.Scale=0.96 end
-        _menuAnimTween=TweenService:Create(_menuAnimScale,TweenInfo.new(0.18,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{Scale=1})
+        if _menuAnimScale.Scale>=0.999 then _menuAnimScale.Scale=0.82 end
+        _menuAnimTween=TweenService:Create(_menuAnimScale,TweenInfo.new(0.24,Enum.EasingStyle.Quart,Enum.EasingDirection.Out),{Scale=1})
         _menuAnimTween:Play()
     else
         root.Visible=true
         if _menuAnimTween then pcall(function() _menuAnimTween:Cancel() end) end
-        _menuAnimTween=TweenService:Create(_menuAnimScale,TweenInfo.new(0.16,Enum.EasingStyle.Quad,Enum.EasingDirection.In),{Scale=0.96})
+        _menuAnimTween=TweenService:Create(_menuAnimScale,TweenInfo.new(0.20,Enum.EasingStyle.Quart,Enum.EasingDirection.In),{Scale=0.82})
         _menuAnimTween:Play()
-        task.delay(0.17,function()
+        task.delay(0.21,function()
             if token==_menuAnimToken and not _hubMenuOpen and not Window.Minimized then pcall(function() Window:Minimize() end) end
         end)
     end
@@ -1254,6 +1349,8 @@ end})
 S(Tabs.Destruction,"TelekinesisForce","Telecinese Force",100,3000,1000,function(v) Cfg.Misc.TelekinesisForce=math.clamp(tonumber(v) or 1000,100,3000) end)
 BindButton(Tabs.Destruction,"Telecinese Key",function() return Cfg.Settings.TelekinesisKeyName end,function(k,n) Cfg.Settings.TelekinesisKey=k; Cfg.Settings.TelekinesisKeyName=n end)
 Tabs.Destruction:AddButton({Title="Release Held Target",Callback=function() _TK.Release() end})
+Tabs.Destruction:AddButton({Title="Matar todos (alinhar alvos)",Callback=AlignAllPlayersForTest})
+Tabs.Destruction:AddParagraph({Title="Teste autorizado",Content="Alinha os personagens vivos em frente ao jogador para teste manual. A função não aplica dano automaticamente."})
 
 
 Tabs.Vehicles:AddSection("Controle de veículos")
