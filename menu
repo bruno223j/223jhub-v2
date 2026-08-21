@@ -740,6 +740,14 @@ end
 -- INVISIBILITY
 -- ============================================================
 local _invisibilityOriginals={}
+local _invisibilityRemote=nil
+local _invisibilityServerActive=false
+local function FindInvisibilityRemote()
+    local ok,rep=pcall(function() return game:GetService("ReplicatedStorage") end)
+    if not ok or not rep then return nil end
+    local remote=rep:FindFirstChild("223JHUB_Invisibility")
+    return remote and remote:IsA("RemoteEvent") and remote or nil
+end
 local function RestoreInvisibility()
     for obj,state in pairs(_invisibilityOriginals) do
         if obj and obj.Parent then pcall(function()
@@ -749,12 +757,20 @@ local function RestoreInvisibility()
     _invisibilityOriginals={}
 end
 local function DisableInvisibility()
+    if _invisibilityRemote and _invisibilityServerActive then pcall(function() _invisibilityRemote:FireServer(false) end) end
+    _invisibilityServerActive=false
     RestoreInvisibility()
 end
 local function EnableInvisibility()
-    RestoreInvisibility()
+    DisableInvisibility()
     local char=LP.Character
     if not char then return end
+    _invisibilityRemote=FindInvisibilityRemote()
+    if _invisibilityRemote then
+        pcall(function() _invisibilityRemote:FireServer(true) end)
+        _invisibilityServerActive=true
+    end
+    -- Mantém fallback local caso o componente servidor não exista na experiência.
     for _,obj in ipairs(char:GetDescendants()) do
         if obj:IsA("BasePart") then
             _invisibilityOriginals[obj]={kind="part",value=obj.LocalTransparencyModifier}
