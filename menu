@@ -985,12 +985,14 @@ AC(UIS.InputBegan:Connect(function(inp,gp)
     if gp and not isMouseInput then return end
     if inp.UserInputType==Enum.UserInputType.MouseWheel and (inp.Position.Z>0 and Cfg.Aim.AimKey=="ScrollUp" or inp.Position.Z<0 and Cfg.Aim.AimKey=="ScrollDown") then _G._scrollAimPulse=true end
     if inp.UserInputType==Enum.UserInputType.MouseButton1 and _TK.Held then
-        if not gp and _TK.ThrowHeld then
-            _TK.ThrowHeld()
-        end
+        if _TK.ThrowHeld then _TK.ThrowHeld() end
         return
     end
-    if BindMatches(inp,Cfg.Settings.ESPKey) then Cfg.ESP.Enabled=not Cfg.ESP.Enabled; TR("ESP")
+    local menuToggle=Cfg.Settings.ToggleKey
+    local menuToggleIsMouse3=(menuToggle==Enum.UserInputType.MouseButton3 or menuToggle=="Mouse3")
+    if menuToggleIsMouse3 and BindMatches(inp,menuToggle) then
+        if _G._223JMenu_ToggleMenu then _G._223JMenu_ToggleMenu() end
+    elseif BindMatches(inp,Cfg.Settings.ESPKey) then Cfg.ESP.Enabled=not Cfg.ESP.Enabled; TR("ESP")
     elseif BindMatches(inp,Cfg.Settings.AimbotKey) then Cfg.Aim.Aimbot=not Cfg.Aim.Aimbot; TR("Aim")
     elseif BindMatches(inp,Cfg.Settings.FlyKey) then Cfg.Misc.Fly=not Cfg.Misc.Fly; if Cfg.Misc.Fly then EnableFly() else DisableFly() end; TR("Fly")
     elseif BindMatches(inp,Cfg.Settings.NoclipKey) then Cfg.Misc.Noclip=not Cfg.Misc.Noclip; if Cfg.Misc.Noclip then EnableNoclip() else DisableNoclip() end; TR("NC")
@@ -1133,7 +1135,7 @@ _TK.Hold=function(kind,model,root)
     bodyPosition.Name="223TelekinesisHold"
     bodyPosition.MaxForce=Vector3.new(1e9,1e9,1e9)
     bodyPosition.P=250000; bodyPosition.D=12000
-    bodyPosition.MaxVelocity=math.huge
+    bodyPosition.MaxVelocity=100000
     bodyPosition.Position=_TK.HoldPosition() or root.Position
     bodyPosition.Parent=root
     local bodyGyro=Instance.new("BodyGyro")
@@ -1156,6 +1158,7 @@ _TK.Hold=function(kind,model,root)
         local held=_TK.Held
         local holdPosition=_TK.HoldPosition()
         if not held or not holdPosition or not held.root or not held.root.Parent or held.root.Anchored or (held.model and not held.model.Parent) then _TK.Release(); return end
+        if held.model and not held.model:IsDescendantOf(Workspace) then _TK.Release(); return end
         pcall(function()
             local holdCFrame=_TK.StableHoldCFrame(holdPosition)
             held.bodyPosition.Position=holdPosition
@@ -1202,7 +1205,14 @@ _TK.Action=function()
     if Cfg.Misc.TelekinesisMode=="Direct" then _TK.ThrowCursor(); return end
     local _,model,root=_TK.FindTarget()
     if not root then
-        Fluent:Notify({Title="Telecinese",Content="Aponte o cursor para um veículo antes de segurar.",Duration=2})
+        task.defer(function()
+            local _,retryModel,retryRoot=_TK.FindTarget()
+            if retryRoot and Cfg.Misc.Telekinesis then
+                if _TK.Hold("Vehicle",retryModel,retryRoot) then Fluent:Notify({Title="Telecinese",Content="Veículo segurado acima de você. Clique para lançar.",Duration=2}) end
+            else
+                Fluent:Notify({Title="Telecinese",Content="Aponte o cursor para um veículo antes de segurar.",Duration=2})
+            end
+        end)
         return
     end
     if _TK.Hold("Vehicle",model,root) then Fluent:Notify({Title="Telecinese",Content="Veículo segurado acima de você. Clique para lançar.",Duration=2}) end
