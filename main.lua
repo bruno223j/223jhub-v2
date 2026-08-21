@@ -1636,7 +1636,7 @@ local function SetHubFocus(open)
 end
 
 local Tabs={
-    Home=Window:AddTab({Title="Home",Icon="house"}),
+    Home=Window:AddTab({Title="Home",Icon="home"}),
     Combat=Window:AddTab({Title="Combat",Icon="crosshair"}),
     Visuals=Window:AddTab({Title="Visuals",Icon="eye"}),
     Radar=Window:AddTab({Title="Radar",Icon="scan-line"}),
