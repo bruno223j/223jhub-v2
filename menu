@@ -423,8 +423,8 @@ local function EnableVehicleFly()
     _vehicleBV.Parent=part
     _vehicleBG=Instance.new("BodyGyro")
     _vehicleBG.MaxTorque=Vector3.new(1e7,1e7,1e7)
-    _vehicleBG.P=2e4
-    _vehicleBG.D=500
+    _vehicleBG.P=1e5
+    _vehicleBG.D=6500
     _vehicleBG.CFrame=part.CFrame
     _vehicleBG.Parent=part
     _vehicleFlyConn=AC(RunService.RenderStepped:Connect(function()
@@ -433,26 +433,27 @@ local function EnableVehicleFly()
         end
         local cf=Cam.CFrame
         local speed=tonumber(Cfg.Misc.VehicleFlySpeed) or 100
-        local cameraForward=Vector3.new(cf.LookVector.X,0,cf.LookVector.Z)
+        local cameraForward=cf.LookVector
         if cameraForward.Magnitude<0.01 then cameraForward=Vector3.new(0,0,-1) end
         cameraForward=cameraForward.Unit
-        local cameraRight=Vector3.new(-cameraForward.Z,0,cameraForward.X)
+        local cameraRight=cf.RightVector
+        if cameraRight.Magnitude<0.01 then cameraRight=Vector3.new(1,0,0) end
+        cameraRight=cameraRight.Unit
         local input=Vector3.zero
         if UIS:IsKeyDown(Enum.KeyCode.W) then input=input+cameraForward end
         if UIS:IsKeyDown(Enum.KeyCode.S) then input=input-cameraForward end
         if UIS:IsKeyDown(Enum.KeyCode.A) then input=input-cameraRight end
         if UIS:IsKeyDown(Enum.KeyCode.D) then input=input+cameraRight end
-        local forward=input.Magnitude>0.05 and input.Unit or Vector3.new(_vehiclePart.CFrame.LookVector.X,0,_vehiclePart.CFrame.LookVector.Z)
-        if forward.Magnitude<0.01 then forward=Vector3.new(0,0,-1) end
-        forward=forward.Unit
-        local right=Vector3.new(-forward.Z,0,forward.X)
         local velocity=Vector3.zero
-        if input.Magnitude>0.05 then velocity=forward*speed end
-        if UIS:IsKeyDown(Enum.KeyCode.Space) then velocity=velocity+Vector3.new(0,speed,0) end
-        if UIS:IsKeyDown(Enum.KeyCode.LeftShift) then velocity=velocity-Vector3.new(0,speed,0) end
+        local moveDirection=cameraForward
+        if input.Magnitude>0.05 then
+            moveDirection=input.Unit
+            velocity=moveDirection*speed
+        end
+        -- BodyVelocity zero mantém a assembly suspensa e impede que ela caia quando parada.
         _vehicleBV.Velocity=velocity
-        -- O carro só muda de direção quando há input e permanece nivelado/estável quando parado.
-        _vehicleBG.CFrame=CFrame.lookAt(_vehiclePart.Position,_vehiclePart.Position+forward,Vector3.yAxis)
+        -- A carroceria acompanha a inclinação da câmera; sem input, permanece rígida apontando para ela.
+        _vehicleBG.CFrame=CFrame.lookAt(_vehiclePart.Position,_vehiclePart.Position+cameraForward,Vector3.yAxis)
     end))
 end
 
@@ -1081,7 +1082,48 @@ _TK.Impulse=function(root,model)
         root.AssemblyAngularVelocity=Cam.CFrame.RightVector*math.clamp(force*0.15,20,450)
     end)
 end
+local function FindTelekinesisShoulder(char)
+    if not char then return nil,"R6" end
+    local upper=char:FindFirstChild("UpperTorso")
+    if upper then
+        local joint=upper:FindFirstChild("RightShoulder") or char:FindFirstChild("RightShoulder",true)
+        if joint and joint:IsA("Motor6D") then return joint,"R15" end
+    end
+    local torso=char:FindFirstChild("Torso")
+    if torso then
+        local joint=torso:FindFirstChild("Right Shoulder") or char:FindFirstChild("Right Shoulder",true)
+        if joint and joint:IsA("Motor6D") then return joint,"R6" end
+    end
+    return nil,"R6"
+end
+local function StopTelekinesisHandPose()
+    if _TK.HandPoseConn then _TK.HandPoseConn:Disconnect(); _TK.HandPoseConn=nil end
+    local pose=_TK.HandPose
+    _TK.HandPose=nil
+    if pose and pose.joint and pose.joint.Parent and pose.base then
+        pcall(function() pose.joint.Transform=pose.base end)
+    end
+end
+local function StartTelekinesisHandPose()
+    StopTelekinesisHandPose()
+    local joint,rig=FindTelekinesisShoulder(LP.Character)
+    if not joint then return end
+    local goal
+    if rig=="R15" then
+        goal=CFrame.Angles(math.rad(-62),math.rad(12),math.rad(28))
+    else
+        goal=CFrame.Angles(0,math.rad(-8),math.rad(112))
+    end
+    _TK.HandPose={joint=joint,base=joint.Transform,goal=goal,alpha=0}
+    _TK.HandPoseConn=RunService.RenderStepped:Connect(function(dt)
+        local pose=_TK.HandPose
+        if not pose or not pose.joint or not pose.joint.Parent then StopTelekinesisHandPose(); return end
+        pose.alpha=math.min(1,pose.alpha+math.max(dt,1/240)*7)
+        pcall(function() pose.joint.Transform=pose.base:Lerp(pose.goal,pose.alpha) end)
+    end)
+end
 _TK.Release=function()
+    StopTelekinesisHandPose()
     if _TK.HoldConn then _TK.HoldConn:Disconnect(); _TK.HoldConn=nil end
     local held=_TK.Held
     _TK.Held=nil
@@ -1119,6 +1161,7 @@ _TK.Hold=function(kind,model,root)
         end
     end
     _TK.Held={kind=kind,model=model,root=root,bodyPosition=bodyPosition,bodyGyro=bodyGyro,collisionOriginals=collisionOriginals}
+    StartTelekinesisHandPose()
     _TK.HoldConn=AC(RunService.RenderStepped:Connect(function()
         local held=_TK.Held
         local holdPosition=_TK.HoldPosition()
@@ -1471,7 +1514,7 @@ Tabs.Destruction:AddParagraph({Title="Teste autorizado",Content="Alinha os perso
 
 
 Tabs.Vehicles:AddSection("Controle de veículos")
-Tabs.Vehicles:AddParagraph({Title="Requisitos",Content="Sente-se em um veículo antes de ativar qualquer função. O Vehicle Fly usa W/A/S/D, Space para subir e Shift Esquerdo para descer."})
+Tabs.Vehicles:AddParagraph({Title="Requisitos",Content="Sente-se em um veículo antes de ativar qualquer função. O Vehicle Fly usa W/A/S/D e segue a direção completa da câmera: olhar para cima faz o veículo subir e inclinar a frente."})
 T(Tabs.Vehicles,"VehicleFly","Vehicle Fly",function() return Cfg.Misc.VehicleFly end,function(v) Cfg.Misc.VehicleFly=v; if v then EnableVehicleFly() else DisableVehicleFly() end end)
 S(Tabs.Vehicles,"VehicleFlySpeed","Vehicle Fly Speed",25,1000,100,function(v) Cfg.Misc.VehicleFlySpeed=v end)
 T(Tabs.Vehicles,"VehicleSpeed","Vehicle Speed",function() return Cfg.Misc.VehicleSpeed end,function(v) Cfg.Misc.VehicleSpeed=v; if v then EnableVehicleSpeed() else DisableVehicleSpeed() end end)
